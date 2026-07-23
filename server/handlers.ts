@@ -61,7 +61,8 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     if (method === 'GET') {
       const sheet = req.query.get('sheet') ?? '';
       if (!isValidSheet(sheet)) return json(400, { error: 'Unknown sheet' });
-      return json(200, { records: listBySheet(sheet).map(toEntity) });
+      const rows = await listBySheet(sheet);
+      return json(200, { records: rows.map(toEntity) });
     }
     if (method === 'POST') {
       const body = (req.body ?? {}) as { sheet?: string; data?: unknown };
@@ -75,7 +76,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
       const data = parsed.data as Record<string, unknown>;
       const assignedTo =
         (data.assignedTo as string | null | undefined) ?? userName ?? null;
-      const row = insert({
+      const row = await insert({
         sheet: body.sheet as SheetName,
         data,
         createdBy: userName,
@@ -92,12 +93,12 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     const id = recordMatch[1];
     if (method === 'PATCH') {
       const body = (req.body ?? {}) as { data?: Record<string, unknown> };
-      const row = patch(id, body.data ?? {});
+      const row = await patch(id, body.data ?? {});
       if (!row) return json(404, { error: 'Not found' });
       return json(200, { record: toEntity(row) });
     }
     if (method === 'DELETE') {
-      const ok = remove(id);
+      const ok = await remove(id);
       if (!ok) return json(404, { error: 'Not found' });
       return json(200, { success: true });
     }
@@ -115,21 +116,24 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     const schema = schemaForSheet[body.sheet as SheetName];
     const created: unknown[] = [];
     const errors: { row: number; issues: unknown }[] = [];
-    (body.records ?? []).forEach((rec, i) => {
-      const parsed = schema.safeParse(rec);
+    // Sequential rather than forEach: inserts are async once the store is
+    // backed by Convex.
+    const incoming = body.records ?? [];
+    for (let i = 0; i < incoming.length; i++) {
+      const parsed = schema.safeParse(incoming[i]);
       if (!parsed.success) {
         errors.push({ row: i, issues: parsed.error.issues });
-        return;
+        continue;
       }
       const data = parsed.data as Record<string, unknown>;
-      const row = insert({
+      const row = await insert({
         sheet: body.sheet as SheetName,
         data,
         createdBy: userName,
         assignedTo: (data.assignedTo as string | null) ?? userName ?? null,
       });
       created.push(toEntity(row));
-    });
+    }
     return json(200, { created: created.length, errors });
   }
 

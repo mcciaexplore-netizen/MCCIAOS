@@ -1,131 +1,31 @@
-// Records store. Uses a local JSON file for zero-setup local dev. When
-// SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are present, swap this module's
-// internals for a Supabase client hitting the single `records` table
-// described in BACKEND_SCHEMA.md — the exported interface stays identical.
+// Records store. Picks its backend from the environment:
+//   CONVEX_URL set  -> Convex deployment (see convex/records.ts)
+//   otherwise       -> local JSON file at server/data/records.json
+// The RecordStore interface is identical either way, so handlers.ts and every
+// caller above it are unaffected by the choice.
 
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createConvexStore } from './convex-store';
+import { fileStore } from './file-store';
+import type { InsertInput, RecordStore, SheetName } from './store-types';
 
-export type SheetName =
-  | 'Company'
-  | 'Session'
-  | 'Followup'
-  | 'Project'
-  | 'Creative'
-  | 'Resource'
-  | 'Settings';
+export type { SheetName, StoredRecord, InsertInput } from './store-types';
+export { SHEET_ALLOWLIST, isValidSheet } from './store-types';
 
-export const SHEET_ALLOWLIST: SheetName[] = [
-  'Company',
-  'Session',
-  'Followup',
-  'Project',
-  'Creative',
-  'Resource',
-  'Settings',
-];
+const CONVEX_URL = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? '';
 
-export interface StoredRecord {
-  id: string;
-  sheet: SheetName;
-  assignedTo: string | null;
-  createdBy: string | null;
-  data: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
+let store: RecordStore | null = null;
+
+function backend(): RecordStore {
+  if (store) return store;
+  store = CONVEX_URL ? createConvexStore(CONVEX_URL) : fileStore;
+  return store;
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = resolve(__dirname, 'data');
-const DATA_FILE = resolve(DATA_DIR, 'records.json');
+export const usingConvex = Boolean(CONVEX_URL);
 
-let cache: StoredRecord[] | null = null;
-
-function load(): StoredRecord[] {
-  if (cache) return cache;
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-  if (!existsSync(DATA_FILE)) {
-    cache = seed();
-    persist();
-    return cache;
-  }
-  try {
-    cache = JSON.parse(readFileSync(DATA_FILE, 'utf-8')) as StoredRecord[];
-  } catch {
-    cache = seed();
-    persist();
-  }
-  return cache!;
-}
-
-function persist() {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(DATA_FILE, JSON.stringify(cache ?? [], null, 2), 'utf-8');
-}
-
-export function isValidSheet(sheet: string): sheet is SheetName {
-  return (SHEET_ALLOWLIST as string[]).includes(sheet);
-}
-
-export function listBySheet(sheet: SheetName): StoredRecord[] {
-  return load()
-    .filter((r) => r.sheet === sheet)
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-}
-
-export function getById(id: string): StoredRecord | undefined {
-  return load().find((r) => r.id === id);
-}
-
-export function insert(input: {
-  sheet: SheetName;
-  data: Record<string, unknown>;
-  createdBy: string | null;
-  assignedTo: string | null;
-}): StoredRecord {
-  const now = new Date().toISOString();
-  const row: StoredRecord = {
-    id: randomUUID(),
-    sheet: input.sheet,
-    assignedTo: input.assignedTo,
-    createdBy: input.createdBy,
-    data: input.data,
-    createdAt: now,
-    updatedAt: now,
-  };
-  load().unshift(row);
-  persist();
-  return row;
-}
-
-export function patch(
-  id: string,
-  data: Record<string, unknown>,
-): StoredRecord | undefined {
-  const row = getById(id);
-  if (!row) return undefined;
-  row.data = { ...row.data, ...data };
-  if (Object.prototype.hasOwnProperty.call(data, 'assignedTo')) {
-    row.assignedTo = (data.assignedTo as string | null) ?? null;
-  }
-  row.updatedAt = new Date().toISOString();
-  persist();
-  return row;
-}
-
-export function remove(id: string): boolean {
-  const list = load();
-  const idx = list.findIndex((r) => r.id === id);
-  if (idx === -1) return false;
-  list.splice(idx, 1);
-  persist();
-  return true;
-}
-
-// No seed data: the store starts empty. Records are created through the
-// app's module add flows.
-function seed(): StoredRecord[] {
-  return [];
-}
+export const listBySheet = (sheet: SheetName) => backend().listBySheet(sheet);
+export const getById = (id: string) => backend().getById(id);
+export const insert = (input: InsertInput) => backend().insert(input);
+export const patch = (id: string, data: Record<string, unknown>) =>
+  backend().patch(id, data);
+export const remove = (id: string) => backend().remove(id);
