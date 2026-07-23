@@ -1,0 +1,74 @@
+// Mounts the runtime-agnostic API handler as Vite dev middleware, so
+// /api/* works during `npm run dev` exactly as it will on Vercel.
+
+import type { Plugin, ViteDevServer } from 'vite';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
+function readBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf-8');
+      if (!raw) return resolve(undefined);
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        resolve(undefined);
+      }
+    });
+  });
+}
+
+export function apiMiddleware(): Plugin {
+  return {
+    name: 'mccia-api-middleware',
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url ?? '';
+        if (!url.startsWith('/api/')) return next();
+
+        try {
+          // Load the handler through Vite so '@' aliases + TS resolve.
+          const mod = await server.ssrLoadModule('/server/handlers.ts');
+          const handleApi = mod.handleApi as typeof import('./handlers').handleApi;
+
+          const parsed = new URL(url, 'http://localhost');
+          const headers: Record<string, string | undefined> = {};
+          for (const [k, v] of Object.entries(req.headers)) {
+            headers[k.toLowerCase()] = Array.isArray(v) ? v.join(',') : v;
+          }
+
+          const body =
+            req.method === 'POST' || req.method === 'PATCH'
+              ? await readBody(req)
+              : undefined;
+
+          const result = await handleApi({
+            method: req.method ?? 'GET',
+            pathname: parsed.pathname,
+            query: parsed.searchParams,
+            headers,
+            body,
+            ip:
+              (headers['x-forwarded-for']?.split(',')[0] ?? '').trim() ||
+              req.socket.remoteAddress ||
+              'unknown',
+          });
+
+          sendJson(res, result.status, result.body);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[api] error', err);
+          sendJson(res, 500, { error: 'Internal server error' });
+        }
+      });
+    },
+  };
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(body));
+}
