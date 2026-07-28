@@ -141,8 +141,7 @@ export const TRANSFER_SPECS: Record<string, TransferSpec> = {
     label: 'Creatives',
     filename: 'creatives',
     columns: [
-      companyRef,
-      { key: 'platform', label: 'Platform', required: true, vocab: 'creativePlatforms', aliases: ['channel'], example: 'Instagram' },
+      { key: 'platform', label: 'Channel', required: true, vocab: 'creativePlatforms', aliases: ['platform'], example: 'WhatsApp' },
       { key: 'status', label: 'Status', vocab: 'creativeStatusValues', example: 'draft' },
       { key: 'imageUrl', label: 'Image URL', aliases: ['image', 'asset'], example: 'https://example.com/post.png' },
       { key: 'caption', label: 'Caption', aliases: ['copy', 'text'], example: 'Launching our new store!' },

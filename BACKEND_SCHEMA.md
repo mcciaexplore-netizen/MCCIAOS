@@ -97,8 +97,8 @@ interface Project {
 
 interface Creative {
   id: string;
-  companyId: string;
-  platform: 'Instagram' | 'Facebook' | 'LinkedIn' | 'WhatsApp' | 'Email';
+  companyId?: string;
+  platform: 'WhatsApp' | 'Social Media' | 'Email' | 'Daily Email' | 'Weekly Email' | 'Monthly Email';
   status: 'draft' | 'scheduled' | 'posted';
   imageUrl?: string;
   caption?: string;

@@ -104,7 +104,7 @@ export interface Project {
 
 export interface Creative {
   id: string;
-  companyId: string;
+  companyId?: string;
   platform: CreativePlatform;
   status: CreativeStatus;
   imageUrl?: string;

@@ -29,11 +29,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   membershipStatuses: ['Member', 'Non-Member', 'Pending'],
   resourceCategories: ['Sheet', 'Dashboard', 'Automation', 'Docs', 'Other'],
   creativePlatforms: [
-    'Instagram',
-    'Facebook',
-    'LinkedIn',
     'WhatsApp',
+    'Social Media',
     'Email',
+    'Daily Email',
+    'Weekly Email',
+    'Monthly Email',
   ],
   projectStages: [
     { label: 'Pre Dev', tone: 'gray' },

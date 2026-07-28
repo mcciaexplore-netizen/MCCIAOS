@@ -68,7 +68,7 @@ export const projectSchema = z.object({
 });
 
 export const creativeSchema = z.object({
-  companyId: z.string().min(1, 'Link a company'),
+  companyId: z.string().optional().or(z.literal('')),
   platform: vocab('Platform is required'),
   status: vocab('Status is required').default(DEFAULT_SETTINGS.creativeStatuses[0].label),
   imageUrl: z.string().url().optional().or(z.literal('')),

@@ -16,7 +16,7 @@ import {
   Select,
   Textarea,
 } from '@/components/ui';
-import { AssigneeSelect, CompanySelect, useCompanyMap } from '@/components/FormControls';
+import { AssigneeSelect } from '@/components/FormControls';
 import { useToast } from '@/components/Toast';
 import { DataTransfer } from '@/components/DataTransfer';
 import { useCreatives } from '@/hooks';
@@ -25,9 +25,17 @@ import { useSettings } from '@/settings/SettingsContext';
 import type { Creative } from '@/types';
 import { relativeTime } from '@/lib/utils';
 
+const SOCIAL_CHANNELS = [
+  'WhatsApp',
+  'Social Media',
+  'Email',
+  'Daily Email',
+  'Weekly Email',
+  'Monthly Email',
+];
+
 export default function Social() {
   const { items, isError, error, invalidate, create, update, remove } = useCreatives();
-  const companyMap = useCompanyMap();
   const { creativeStatusValues, creativeStatusTone } = useSettings();
   const { toast } = useToast();
 
@@ -114,9 +122,6 @@ export default function Social() {
                 <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
                   {c.caption || 'No caption'}
                 </p>
-                <p className="mt-2 text-xs text-slate-400">
-                  {companyMap[c.companyId] ?? 'Unknown company'}
-                </p>
               </div>
             </Card>
           ))}
@@ -162,7 +167,7 @@ function CreativeDrawer({
   onUpdate: (id: string, data: CreativeInput) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
-  const { creativePlatforms, creativeStatusValues } = useSettings();
+  const { creativeStatusValues } = useSettings();
 
   const {
     register,
@@ -174,8 +179,7 @@ function CreativeDrawer({
     values: creative
       ? (creative as unknown as CreativeInput)
       : {
-          companyId: '',
-          platform: creativePlatforms[0],
+          platform: SOCIAL_CHANNELS[0],
           status: creativeStatusValues[0],
         },
   });
@@ -217,13 +221,10 @@ function CreativeDrawer({
       }
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Company" required error={errors.companyId?.message}>
-          <CompanySelect {...register('companyId')} />
-        </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Platform" required>
+          <Field label="Channel" required>
             <Select {...register('platform')}>
-              {creativePlatforms.map((p) => (
+              {SOCIAL_CHANNELS.map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
