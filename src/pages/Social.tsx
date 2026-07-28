@@ -18,6 +18,7 @@ import {
 } from '@/components/ui';
 import { AssigneeSelect, CompanySelect, useCompanyMap } from '@/components/FormControls';
 import { useToast } from '@/components/Toast';
+import { DataTransfer } from '@/components/DataTransfer';
 import { useCreatives } from '@/hooks';
 import { creativeSchema, type CreativeInput } from '@/schemas';
 import { useSettings } from '@/settings/SettingsContext';
@@ -45,15 +46,18 @@ export default function Social() {
         title="Social"
         subtitle={`${items.length} creatives`}
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setDrawerOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Add Creative
-          </Button>
+          <>
+            <DataTransfer sheet="Creative" />
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setDrawerOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" /> Add Creative
+            </Button>
+          </>
         }
       />
 

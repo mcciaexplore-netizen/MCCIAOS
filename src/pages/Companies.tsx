@@ -1,12 +1,10 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Building2,
   Plus,
   Search,
-  Upload,
-  Download,
   Mail,
   Phone,
   MapPin,
@@ -31,36 +29,17 @@ import {
   matchesAssignee,
 } from '@/components/FormControls';
 import { useToast } from '@/components/Toast';
+import { DataTransfer } from '@/components/DataTransfer';
 import { useCompanies } from '@/hooks';
 import { companySchema, type CompanyInput } from '@/schemas';
 import { useSettings } from '@/settings/SettingsContext';
 import type { Company } from '@/types';
-import { parseCsv, toCsv, download } from '@/lib/csv';
 import { relativeTime } from '@/lib/utils';
-
-const CSV_COLUMNS = [
-  'companyName',
-  'contactName',
-  'contactEmail',
-  'contactPhone',
-  'contactRole',
-  'udyamNumber',
-  'district',
-  'industry',
-  'membershipStatus',
-  'rampScheme',
-  'leadSource',
-  'businessScale',
-  'status',
-  'assignedTo',
-];
 
 export default function Companies() {
   const { items, isError, error, invalidate, create, update, remove } = useCompanies();
-  const { companyStatusValues, companyStatusTone, leadSources, businessScales } =
-    useSettings();
+  const { companyStatusValues, companyStatusTone } = useSettings();
   const { toast } = useToast();
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -94,47 +73,6 @@ export default function Companies() {
     setDrawerOpen(true);
   }
 
-  function handleExport() {
-    download('companies.csv', toCsv(items as unknown as Record<string, unknown>[], CSV_COLUMNS));
-    toast('Exported companies to CSV');
-  }
-
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const rows = parseCsv(text);
-    if (rows.length === 0) {
-      toast('No rows found in file', 'error');
-      return;
-    }
-    // Unknown vocabulary values fall back to the first configured option.
-    const payload = rows.map((r) => ({
-      ...r,
-      rampScheme: r.rampScheme === 'true' || r.rampScheme === 'TRUE',
-      leadSource: leadSources.includes(r.leadSource)
-        ? r.leadSource
-        : leadSources[0],
-      businessScale: businessScales.includes(r.businessScale)
-        ? r.businessScale
-        : businessScales[0],
-      status: companyStatusValues.includes(r.status)
-        ? r.status
-        : companyStatusValues[0],
-    }));
-    let ok = 0;
-    for (const p of payload) {
-      try {
-        await create.mutateAsync(p as Partial<Company>);
-        ok++;
-      } catch {
-        /* skip invalid row */
-      }
-    }
-    toast(`Imported ${ok} of ${rows.length} companies`, ok ? 'success' : 'error');
-    if (fileRef.current) fileRef.current.value = '';
-  }
-
   return (
     <div>
       <PageHeader
@@ -142,19 +80,7 @@ export default function Companies() {
         subtitle={`${items.length} MSME records`}
         actions={
           <>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={handleImport}
-            />
-            <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()}>
-              <Upload className="h-4 w-4" /> Import
-            </Button>
-            <Button variant="secondary" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4" /> Export
-            </Button>
+            <DataTransfer sheet="Company" />
             <Button size="sm" onClick={openNew}>
               <Plus className="h-4 w-4" /> Add Company
             </Button>

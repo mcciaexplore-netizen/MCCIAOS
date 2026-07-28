@@ -31,6 +31,7 @@ import {
   useCompanyMap,
 } from '@/components/FormControls';
 import { useToast } from '@/components/Toast';
+import { DataTransfer } from '@/components/DataTransfer';
 import { useSessions, useFollowups } from '@/hooks';
 import { sessionSchema, type SessionInput } from '@/schemas';
 import { useSettings } from '@/settings/SettingsContext';
@@ -75,15 +76,18 @@ export default function Consulting() {
         title="Consulting"
         subtitle={`${items.length} sessions logged`}
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setDrawerOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Add Session
-          </Button>
+          <>
+            <DataTransfer sheet="Session" />
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setDrawerOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" /> Add Session
+            </Button>
+          </>
         }
       />
 

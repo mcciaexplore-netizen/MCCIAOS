@@ -40,6 +40,7 @@ import {
   useCompanyMap,
 } from '@/components/FormControls';
 import { useToast } from '@/components/Toast';
+import { DataTransfer } from '@/components/DataTransfer';
 import { useCompanies, useProjects } from '@/hooks';
 import {
   companyQuickSchema,
@@ -122,6 +123,7 @@ export default function AppDevelopment() {
                 <List className="h-4 w-4" />
               </button>
             </div>
+            <DataTransfer sheet="Project" />
             <Button
               size="sm"
               onClick={() => {

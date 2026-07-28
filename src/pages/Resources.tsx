@@ -28,6 +28,7 @@ import {
   Textarea,
 } from '@/components/ui';
 import { useToast } from '@/components/Toast';
+import { DataTransfer } from '@/components/DataTransfer';
 import { useResources } from '@/hooks';
 import { resourceSchema, type ResourceInput } from '@/schemas';
 import { useSettings } from '@/settings/SettingsContext';
@@ -74,15 +75,18 @@ export default function Resources() {
         title="Resources"
         subtitle="Shared links, visible to the whole team"
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setDrawerOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Add Resource
-          </Button>
+          <>
+            <DataTransfer sheet="Resource" />
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setDrawerOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" /> Add Resource
+            </Button>
+          </>
         }
       />
 

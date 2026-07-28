@@ -1,5 +1,8 @@
-// Minimal CSV read/write for bulk company import/export. Handles quoted
-// fields, embedded commas, quotes, and newlines.
+// Minimal delimited-text read/write. Handles quoted fields, embedded
+// delimiters, quotes, and newlines.
+//
+// Excel (.xlsx) support and file-type sniffing live in ./spreadsheet, which
+// builds on the pieces here.
 
 export function toCsv(rows: Record<string, unknown>[], columns: string[]): string {
   const escape = (val: unknown) => {
@@ -14,17 +17,22 @@ export function toCsv(rows: Record<string, unknown>[], columns: string[]): strin
   return `${header}\n${body}`;
 }
 
-export function parseCsv(text: string): Record<string, string>[] {
+/** Split delimited text into a raw grid of cells, honouring quoted fields. */
+export function splitDelimited(text: string, delimiter = ','): string[][] {
   const rows: string[][] = [];
   let field = '';
   let row: string[] = [];
   let inQuotes = false;
 
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  // A leading BOM survives Excel's "CSV UTF-8" export and would otherwise
+  // become part of the first header name, breaking that column's mapping.
+  const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
     if (inQuotes) {
       if (ch === '"') {
-        if (text[i + 1] === '"') {
+        if (src[i + 1] === '"') {
           field += '"';
           i++;
         } else {
@@ -35,11 +43,11 @@ export function parseCsv(text: string): Record<string, string>[] {
       }
     } else if (ch === '"') {
       inQuotes = true;
-    } else if (ch === ',') {
+    } else if (ch === delimiter) {
       row.push(field);
       field = '';
     } else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && text[i + 1] === '\n') i++;
+      if (ch === '\r' && src[i + 1] === '\n') i++;
       row.push(field);
       rows.push(row);
       field = '';
@@ -52,21 +60,41 @@ export function parseCsv(text: string): Record<string, string>[] {
     row.push(field);
     rows.push(row);
   }
+  return rows;
+}
 
+/**
+ * Map a raw grid onto its header row. Blank rows are dropped, cells are
+ * trimmed, and unnamed columns are ignored.
+ */
+export function rowsToObjects(rows: string[][]): Record<string, string>[] {
   const nonEmpty = rows.filter((r) => r.some((c) => c.trim() !== ''));
   if (nonEmpty.length < 2) return [];
   const header = nonEmpty[0].map((h) => h.trim());
   return nonEmpty.slice(1).map((r) => {
     const obj: Record<string, string> = {};
     header.forEach((h, i) => {
-      obj[h] = (r[i] ?? '').trim();
+      if (h) obj[h] = (r[i] ?? '').trim();
     });
     return obj;
   });
 }
 
+export function parseDelimited(
+  text: string,
+  delimiter = ',',
+): Record<string, string>[] {
+  return rowsToObjects(splitDelimited(text, delimiter));
+}
+
+export const parseCsv = (text: string) => parseDelimited(text, ',');
+
 export function download(filename: string, content: string, type = 'text/csv') {
-  const blob = new Blob([content], { type });
+  // Excel on Windows assumes the system codepage for a plain CSV, which
+  // mangles any non-ASCII company name. A BOM makes it read UTF-8.
+  const blob = new Blob([type.startsWith('text/csv') ? '﻿' : '', content], {
+    type,
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
