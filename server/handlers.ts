@@ -4,6 +4,7 @@
 
 import { importSchemaForSheet, schemaForSheet } from '../src/schemas/index.js';
 import {
+  describeStore,
   insert,
   isValidSheet,
   listBySheet,
@@ -54,6 +55,31 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   // GET /api/me — echoes identity, no validation (TRD.md section 4).
   if (pathname === '/api/me' && method === 'GET') {
     return json(200, { name: userName });
+  }
+
+  // GET /api/health — is this deployment wired up correctly?
+  // Every other route answers a failure with an opaque 500, which says nothing
+  // about whether the database is unset, unreachable, or empty. This one
+  // actually runs a read so the answer is real, and reports the host but never
+  // the connection string.
+  if (pathname === '/api/health' && method === 'GET') {
+    const info = describeStore();
+    try {
+      const rows = await listBySheet('Settings');
+      return json(200, {
+        ok: true,
+        ...info,
+        dbReachable: true,
+        settingsRecords: rows.length,
+      });
+    } catch (err) {
+      return json(503, {
+        ok: false,
+        ...info,
+        dbReachable: false,
+        error: (err as Error).message,
+      });
+    }
   }
 
   // ---- /api/records ------------------------------------------------------

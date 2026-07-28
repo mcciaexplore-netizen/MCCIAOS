@@ -32,9 +32,15 @@ export default async function handler(req: VercelReq, res: ServerResponse) {
     // Mirrors the dev middleware: an unhandled failure (most likely the
     // database being unreachable) must still come back as JSON, because the
     // client parses every response as JSON.
+    //
+    // The message is passed through rather than replaced with "Internal server
+    // error". This is an internal tool, the failures here are configuration
+    // ones — DATABASE_URL unset, database unreachable — and a generic string
+    // leaves whoever is on call with nothing to act on. Only the message is
+    // sent, never the stack.
     // eslint-disable-next-line no-console
     console.error('[api] error', err);
-    send(res, 500, { error: 'Internal server error' });
+    send(res, 500, { error: (err as Error)?.message || 'Internal server error' });
   }
 }
 

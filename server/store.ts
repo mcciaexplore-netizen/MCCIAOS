@@ -15,8 +15,63 @@ export { SHEET_ALLOWLIST, isValidSheet } from './store-types.js';
 
 const connectionString = process.env.DATABASE_URL?.trim();
 
+// Vercel and Lambda both expose a read-only filesystem outside /tmp, so the
+// JSON file store cannot work there — it throws EROFS on the first mkdir,
+// which surfaces as an opaque 500 on every page. Detect the platform so the
+// cause can be named instead of guessed at.
+const isServerless = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME,
+);
+
+/** What the store is doing right now, for /api/health. Never includes secrets. */
+export function describeStore(): {
+  store: 'postgres' | 'file' | 'unconfigured';
+  databaseUrlSet: boolean;
+  host?: string;
+  serverless: boolean;
+} {
+  if (!connectionString) {
+    return {
+      store: isServerless ? 'unconfigured' : 'file',
+      databaseUrlSet: false,
+      serverless: isServerless,
+    };
+  }
+  let host: string | undefined;
+  try {
+    host = new URL(connectionString).host;
+  } catch {
+    host = undefined;
+  }
+  return { store: 'postgres', databaseUrlSet: true, host, serverless: isServerless };
+}
+
+const MISSING_URL_MESSAGE =
+  'DATABASE_URL is not set on this deployment. Add it in your hosting ' +
+  "provider's environment variables and redeploy — the local file store " +
+  'cannot be used here because the filesystem is read-only.';
+
+/** Stand-in store whose every call explains the misconfiguration. */
+function unconfiguredStore(): RecordStore {
+  const fail = async (): Promise<never> => {
+    throw new Error(MISSING_URL_MESSAGE);
+  };
+  return {
+    listBySheet: fail,
+    getById: fail,
+    insert: fail,
+    patch: fail,
+    remove: fail,
+  };
+}
+
 function selectBackend(): RecordStore {
   if (!connectionString) {
+    if (isServerless) {
+      // eslint-disable-next-line no-console
+      console.error(`[store] ${MISSING_URL_MESSAGE}`);
+      return unconfiguredStore();
+    }
     // eslint-disable-next-line no-console
     console.info(
       '[store] DATABASE_URL not set — using the local file store ' +

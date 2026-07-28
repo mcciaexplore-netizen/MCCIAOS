@@ -58,9 +58,13 @@ export function apiMiddleware(): Plugin {
 
           sendJson(res, result.status, result.body);
         } catch (err) {
+          // Same reasoning as api/[...path].ts: surface the message so a
+          // misconfiguration is readable in the UI, not just the terminal.
           // eslint-disable-next-line no-console
           console.error('[api] error', err);
-          sendJson(res, 500, { error: 'Internal server error' });
+          sendJson(res, 500, {
+            error: (err as Error)?.message || 'Internal server error',
+          });
         }
       });
     },
