@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   DndContext,
@@ -35,7 +35,7 @@ import {
 import {
   AssigneeSelect,
   AssigneeFilterSelect,
-  CompanySelect,
+  CompanySearchSelect,
   matchesAssignee,
   useCompanyMap,
 } from '@/components/FormControls';
@@ -43,18 +43,15 @@ import { useToast } from '@/components/Toast';
 import { DataTransfer } from '@/components/DataTransfer';
 import { useCompanies, useProjects } from '@/hooks';
 import {
-  companyQuickSchema,
   projectSchema,
-  type CompanyQuickInput,
   type ProjectInput,
 } from '@/schemas';
 import { useSettings } from '@/settings/SettingsContext';
-import type { Company, Project, ProjectStage } from '@/types';
+import type { Project, ProjectStage } from '@/types';
 import { cn, relativeTime } from '@/lib/utils';
 
 export default function AppDevelopment() {
   const { items, isError, error, invalidate, create, update, remove } = useProjects();
-  const { create: createCompany } = useCompanies();
   const companyMap = useCompanyMap();
   const { projectStageValues, projectStageTone } = useSettings();
   const { toast } = useToast();
@@ -197,12 +194,10 @@ export default function AppDevelopment() {
         open={companyDrawerOpen}
         onClose={() => setCompanyDrawerOpen(false)}
         onCreate={async (data) => {
-          // Save the company, then drop a matching card into Pre Dev so it
-          // can be dragged onward as the work progresses.
-          const { record } = await createCompany.mutateAsync(data as Partial<Company>);
+          const companyName = companyMap[data.companyId] ?? 'Company';
           await create.mutateAsync({
-            companyId: record.id,
-            title: data.companyName,
+            companyId: data.companyId,
+            title: companyName,
             stage: firstStage,
             progressPct: 0,
           } as Partial<Project>);
@@ -214,8 +209,7 @@ export default function AppDevelopment() {
   );
 }
 
-// Minimal company capture from the Kanban — just enough to link a project to.
-// The rest of the MSME profile is filled in on the Companies page.
+// Adds an existing company to the Kanban by creating a linked project card.
 function QuickCompanyDrawer({
   open,
   onClose,
@@ -223,56 +217,71 @@ function QuickCompanyDrawer({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: CompanyQuickInput) => Promise<void>;
+  onCreate: (data: Pick<ProjectInput, 'companyId'>) => Promise<void>;
 }) {
+  const [companyId, setCompanyId] = useState('');
+  const { items: companies } = useCompanies();
   const {
-    register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
-  } = useForm<CompanyQuickInput>({
-    resolver: zodResolver(companyQuickSchema),
+  } = useForm<Pick<ProjectInput, 'companyId'>>({
+    resolver: zodResolver(projectSchema.pick({ companyId: true })),
     defaultValues: {
-      companyName: '',
-      contactName: '',
-      contactPhone: '',
-      contactEmail: '',
+      companyId: '',
     },
   });
 
   const submit = handleSubmit(async (data) => {
     await onCreate(data);
+    setCompanyId('');
     reset();
   });
+
+  function closeDrawer() {
+    onClose();
+    setCompanyId('');
+    reset();
+  }
+
+  function handleCompanyChange(value: string) {
+    setCompanyId(value);
+    setValue('companyId', value, { shouldDirty: true, shouldValidate: true });
+  }
 
   return (
     <SlideOver
       open={open}
-      onClose={onClose}
+      onClose={closeDrawer}
       title="Add Company"
       footer={
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose}>
+          <Button variant="secondary" size="sm" onClick={closeDrawer}>
             Cancel
           </Button>
-          <Button size="sm" onClick={submit} disabled={isSubmitting}>
+          <Button size="sm" onClick={submit} disabled={isSubmitting || !companyId}>
             Add Company
           </Button>
         </div>
       }
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Company Name" required error={errors.companyName?.message}>
-          <Input {...register('companyName')} placeholder="Acme Traders" />
-        </Field>
-        <Field label="Name" required error={errors.contactName?.message}>
-          <Input {...register('contactName')} placeholder="Contact person" />
-        </Field>
-        <Field label="Phone Number" required error={errors.contactPhone?.message}>
-          <Input type="tel" {...register('contactPhone')} placeholder="+91 98765 43210" />
-        </Field>
-        <Field label="Email" required error={errors.contactEmail?.message}>
-          <Input type="email" {...register('contactEmail')} placeholder="name@company.com" />
+        <Field
+          label="Company"
+          required
+          error={errors.companyId?.message}
+          hint={
+            companies.length === 0
+              ? 'Add companies from the Companies section first.'
+              : undefined
+          }
+        >
+          <CompanySearchSelect
+            value={companyId}
+            onChange={handleCompanyChange}
+            disabled={companies.length === 0}
+          />
         </Field>
       </form>
     </SlideOver>
@@ -464,6 +473,7 @@ function ProjectDrawer({
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
@@ -520,7 +530,13 @@ function ProjectDrawer({
           <Input {...register('title')} placeholder="Inventory Dashboard" />
         </Field>
         <Field label="Company" required error={errors.companyId?.message}>
-          <CompanySelect {...register('companyId')} />
+          <Controller
+            control={control}
+            name="companyId"
+            render={({ field }) => (
+              <CompanySearchSelect value={field.value} onChange={field.onChange} />
+            )}
+          />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Stage" required>
