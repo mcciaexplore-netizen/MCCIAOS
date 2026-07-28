@@ -6,17 +6,39 @@ import { useTheme } from '@/lib/theme';
 import { useFollowups } from '@/hooks';
 import { cn, daysUntil } from '@/lib/utils';
 
+// Drop the MCCIA wordmark at this path to use it. Swap the extension here if
+// you have an SVG — nothing else needs to change. Until the file exists the
+// lettermark below renders instead, so a missing asset never shows a broken
+// image icon.
+const LOGO_SRC = '/logo.png';
+
 function Brand() {
+  const [logoFailed, setLogoFailed] = useState(false);
+
   return (
     <div className="flex items-center gap-2.5 px-2">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-        M
-      </div>
+      {logoFailed ? (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
+          M
+        </div>
+      ) : (
+        // The wordmark's blue sits low-contrast on the dark sidebar, so in dark
+        // mode it gets a white plate rather than being recoloured — the brand
+        // colours stay correct in both themes.
+        <div className="shrink-0 rounded dark:bg-white dark:px-1.5 dark:py-1">
+          <img
+            src={LOGO_SRC}
+            alt="MCCIA"
+            className="h-7 w-auto max-w-[7rem] object-contain"
+            onError={() => setLogoFailed(true)}
+          />
+        </div>
+      )}
       <div className="leading-tight">
         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           Intern OS
         </div>
-        <div className="text-[11px] text-slate-400">MCCIA · Applied AI Studio</div>
+        <div className="text-[11px] text-slate-400">Applied AI Studio</div>
       </div>
     </div>
   );
