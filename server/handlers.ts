@@ -2,7 +2,7 @@
 // middleware (server/vite-plugin.ts) and the Vercel functions (api/*.ts),
 // so dev and prod behave identically (TRD.md section 8).
 
-import { schemaForSheet } from '@/schemas';
+import { importSchemaForSheet, schemaForSheet } from '@/schemas';
 import {
   insert,
   isValidSheet,
@@ -113,7 +113,9 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     };
     if (!body.sheet || !isValidSheet(body.sheet))
       return json(400, { error: 'Unknown sheet' });
-    const schema = schemaForSheet[body.sheet as SheetName];
+    // Deliberately the lenient schema: a spreadsheet row with blanks still
+    // imports, where the single-record POST above stays strict.
+    const schema = importSchemaForSheet[body.sheet as SheetName];
     const created: unknown[] = [];
     const errors: { row: number; issues: unknown }[] = [];
     // Sequential rather than forEach: store inserts are async.

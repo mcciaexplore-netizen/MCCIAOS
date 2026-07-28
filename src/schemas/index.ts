@@ -130,6 +130,100 @@ export type ProjectInput = z.infer<typeof projectSchema>;
 export type CreativeInput = z.infer<typeof creativeSchema>;
 export type ResourceInput = z.infer<typeof resourceSchema>;
 
+// ---- Import schemas -------------------------------------------------------
+// Bulk import must never drop a row because a cell was blank: a half-filled
+// MSME record is still worth having, and the missing pieces get filled in
+// later from the UI. So every field is optional here and the email/url format
+// checks are relaxed to plain text — an imported address that looks wrong is
+// still the customer's real data, and hiding the whole row helps nobody.
+//
+// The strict schemas above are unchanged and still guard the manual forms;
+// these apply only to /api/bulk and the import preview. Keep the two in sync
+// when adding a field.
+const anyText = z.string().optional();
+// Vocabulary fields keep their default so a blank cell still lands on a value
+// the filters and badges can render.
+const anyVocab = (fallback: string) => z.string().default(fallback);
+
+export const companyImportSchema = z.object({
+  companyName: anyText,
+  contactName: anyText,
+  contactEmail: anyText,
+  contactPhone: anyText,
+  contactRole: anyText,
+  udyamNumber: anyText,
+  district: anyText,
+  industry: anyText,
+  membershipStatus: anyText,
+  rampScheme: z.boolean().optional(),
+  leadSource: anyText,
+  businessScale: anyText,
+  status: anyVocab(DEFAULT_SETTINGS.companyStatuses[0].label),
+  assignedTo: z.string().nullable().optional(),
+});
+
+export const sessionImportSchema = z.object({
+  companyId: anyText,
+  query: anyText,
+  solution: anyText,
+  consultant: anyText,
+  mode: anyText,
+  payment: anyText,
+  domain: anyText,
+  outcome: anyText,
+  status: anyVocab(DEFAULT_SETTINGS.sessionStatuses[0].label),
+  assignedTo: z.string().nullable().optional(),
+});
+
+export const followupImportSchema = z.object({
+  sessionId: anyText,
+  dueDate: anyText,
+  note: anyText,
+  done: z.boolean().default(false),
+  assignedTo: z.string().nullable().optional(),
+});
+
+export const projectImportSchema = z.object({
+  companyId: anyText,
+  title: anyText,
+  stage: anyVocab(DEFAULT_SETTINGS.projectStages[0].label),
+  progressPct: z.coerce.number().min(0).max(100).catch(0).default(0),
+  repoUrl: anyText,
+  liveUrl: anyText,
+  nextAction: anyText,
+  blocker: anyText,
+  assignedTo: z.string().nullable().optional(),
+});
+
+export const creativeImportSchema = z.object({
+  companyId: anyText,
+  platform: anyText,
+  status: anyVocab(DEFAULT_SETTINGS.creativeStatuses[0].label),
+  imageUrl: anyText,
+  caption: anyText,
+  assignedTo: z.string().nullable().optional(),
+});
+
+export const resourceImportSchema = z.object({
+  name: anyText,
+  url: anyText,
+  description: anyText,
+  category: anyText,
+  addedBy: anyText,
+});
+
+/** Lenient lookup used by /api/bulk and the import preview. */
+export const importSchemaForSheet: Record<SheetName, z.ZodTypeAny> = {
+  Company: companyImportSchema,
+  Session: sessionImportSchema,
+  Followup: followupImportSchema,
+  Project: projectImportSchema,
+  Creative: creativeImportSchema,
+  Resource: resourceImportSchema,
+  // Settings is never bulk-imported; keep it strict.
+  Settings: settingsSchema,
+};
+
 // Server-side validation lookup by sheet name.
 export const schemaForSheet: Record<SheetName, z.ZodTypeAny> = {
   Company: companySchema,

@@ -18,7 +18,7 @@ import { Badge, Button, Modal, Select } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useCompanies } from '@/hooks';
 import { api } from '@/lib/api';
-import { schemaForSheet } from '@/schemas';
+import { importSchemaForSheet } from '@/schemas';
 import { useSettings } from '@/settings/SettingsContext';
 import {
   TRANSFER_SPECS,
@@ -142,23 +142,29 @@ export function DataTransfer({ sheet }: { sheet: SheetName }) {
 
   const prepared = useMemo<PreparedRow[] | null>(() => {
     if (!source) return null;
-    return source.rows.map((r, i) => {
-      const built = buildImportRow(r, spec, mapping, ctx);
-      if (built.error) return { ...built, line: i + 2 };
-      // Same schema the server runs, so a row that passes here will insert.
-      const parsed = schemaForSheet[sheet].safeParse(built.data);
-      if (!parsed.success) {
-        const first = parsed.error.issues[0];
-        const field = String(first.path[0] ?? '');
-        const label = spec.columns.find((c) => c.key === field)?.label ?? field;
-        return {
-          ...built,
-          line: i + 2,
-          error: label ? `${label}: ${first.message}` : first.message,
-        };
-      }
-      return { ...built, data: parsed.data as Record<string, unknown>, line: i + 2 };
-    });
+    return source.rows
+      .map((r, i) => ({ built: buildImportRow(r, spec, mapping, ctx), line: i + 2 }))
+      // A row whose mapped columns are all blank would insert a record holding
+      // nothing but schema defaults, so drop it rather than report it — the
+      // user did not ask to import an empty line.
+      .filter(({ built }) => built.error || Object.keys(built.data).length > 0)
+      .map(({ built, line }) => {
+        if (built.error) return { ...built, line };
+        // Lenient schema: blanks are kept as blanks rather than failing the
+        // row. Same schema /api/bulk runs, so anything shown as ready inserts.
+        const parsed = importSchemaForSheet[sheet].safeParse(built.data);
+        if (!parsed.success) {
+          const first = parsed.error.issues[0];
+          const field = String(first.path[0] ?? '');
+          const label = spec.columns.find((c) => c.key === field)?.label ?? field;
+          return {
+            ...built,
+            line,
+            error: label ? `${label}: ${first.message}` : first.message,
+          };
+        }
+        return { ...built, data: parsed.data as Record<string, unknown>, line };
+      });
   }, [source, mapping, spec, ctx, sheet]);
 
   const unmatched = useMemo(() => {
@@ -365,12 +371,12 @@ function ImportPreview({
       </div>
 
       {missingRequired.length > 0 && (
-        <p className="rounded-lg border border-rose-200 bg-rose-50/50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-300">
-          No column found for{' '}
+        <p className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+          No column matched{' '}
           <span className="font-medium">
             {missingRequired.map((c) => c.label).join(', ')}
           </span>
-          . Pick the matching column below — every row fails until you do.
+          . Those will be imported blank — pick a column below if that is wrong.
         </p>
       )}
 

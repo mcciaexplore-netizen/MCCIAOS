@@ -147,12 +147,18 @@ export default function Companies() {
                 <Badge tone={companyStatusTone[c.status] ?? 'gray'}>{c.status}</Badge>
               </div>
               <div className="mt-3 space-y-1.5 text-sm text-slate-500">
-                <div className="flex items-center gap-2 truncate">
-                  <Mail className="h-3.5 w-3.5 shrink-0" /> {c.contactEmail}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Phone className="h-3.5 w-3.5 shrink-0" /> {c.contactPhone}
-                </div>
+                {/* Imported rows may legitimately have no contact details, so
+                    each line is omitted rather than rendering a bare icon. */}
+                {c.contactEmail && (
+                  <div className="flex items-center gap-2 truncate">
+                    <Mail className="h-3.5 w-3.5 shrink-0" /> {c.contactEmail}
+                  </div>
+                )}
+                {c.contactPhone && (
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-3.5 w-3.5 shrink-0" /> {c.contactPhone}
+                  </div>
+                )}
                 {c.district && (
                   <div className="flex items-center gap-2">
                     <MapPin className="h-3.5 w-3.5 shrink-0" /> {c.district}
