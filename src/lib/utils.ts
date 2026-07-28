@@ -39,13 +39,3 @@ export function daysUntil(iso?: string): number | null {
   startOfToday.setHours(0, 0, 0, 0);
   return Math.round((d - startOfToday.getTime()) / 86400000);
 }
-
-export function initials(name?: string | null): string {
-  if (!name) return '?';
-  return name
-    .split(' ')
-    .map((p) => p[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-}

@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   EmptyState,
+  ErrorState,
   Field,
   FilterPill,
   Input,
@@ -24,7 +25,7 @@ import type { Creative } from '@/types';
 import { relativeTime } from '@/lib/utils';
 
 export default function Social() {
-  const { items, create, update, remove } = useCreatives();
+  const { items, isError, error, invalidate, create, update, remove } = useCreatives();
   const companyMap = useCompanyMap();
   const { creativeStatusValues, creativeStatusTone } = useSettings();
   const { toast } = useToast();
@@ -55,6 +56,12 @@ export default function Social() {
           </Button>
         }
       />
+
+      {isError && (
+        <div className="mb-4">
+          <ErrorState error={error} onRetry={invalidate} />
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterPill active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>

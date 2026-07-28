@@ -1,6 +1,6 @@
 -- Production schema + one-time migrations for MCCIA Intern OS.
 -- The local dev store (server/store.ts) mirrors this shape in a JSON file;
--- run this against Supabase Postgres for production.
+-- run this against Neon Postgres for production.
 
 create table if not exists records (
   id          uuid primary key default gen_random_uuid(),

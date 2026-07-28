@@ -20,6 +20,7 @@ import {
   Button,
   Card,
   EmptyState,
+  ErrorState,
   Field,
   FilterPill,
   Input,
@@ -44,7 +45,7 @@ const categoryIcon: Record<ResourceCategory, typeof Table> = {
 };
 
 export default function Resources() {
-  const { items, create, update, remove } = useResources();
+  const { items, isError, error, invalidate, create, update, remove } = useResources();
   const { resourceCategories } = useSettings();
   const { toast } = useToast();
 
@@ -84,6 +85,12 @@ export default function Resources() {
           </Button>
         }
       />
+
+      {isError && (
+        <div className="mb-4">
+          <ErrorState error={error} onRetry={invalidate} />
+        </div>
+      )}
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative max-w-xs flex-1">

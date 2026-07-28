@@ -126,11 +126,9 @@ export const settingsSchema = z.object({
 export type CompanyInput = z.infer<typeof companySchema>;
 export type CompanyQuickInput = z.infer<typeof companyQuickSchema>;
 export type SessionInput = z.infer<typeof sessionSchema>;
-export type FollowupInput = z.infer<typeof followupSchema>;
 export type ProjectInput = z.infer<typeof projectSchema>;
 export type CreativeInput = z.infer<typeof creativeSchema>;
 export type ResourceInput = z.infer<typeof resourceSchema>;
-export type SettingsInput = z.infer<typeof settingsSchema>;
 
 // Server-side validation lookup by sheet name.
 export const schemaForSheet: Record<SheetName, z.ZodTypeAny> = {

@@ -19,6 +19,7 @@ import {
   Button,
   Card,
   EmptyState,
+  ErrorState,
   Field,
   FilterPill,
   Input,
@@ -55,7 +56,7 @@ const CSV_COLUMNS = [
 ];
 
 export default function Companies() {
-  const { items, create, update, remove } = useCompanies();
+  const { items, isError, error, invalidate, create, update, remove } = useCompanies();
   const { companyStatusValues, companyStatusTone, leadSources, businessScales } =
     useSettings();
   const { toast } = useToast();
@@ -160,6 +161,12 @@ export default function Companies() {
           </>
         }
       />
+
+      {isError && (
+        <div className="mb-4">
+          <ErrorState error={error} onRetry={invalidate} />
+        </div>
+      )}
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative max-w-xs flex-1">

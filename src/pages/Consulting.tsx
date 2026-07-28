@@ -16,6 +16,7 @@ import {
   Button,
   Card,
   EmptyState,
+  ErrorState,
   Field,
   FilterPill,
   Input,
@@ -37,7 +38,7 @@ import type { Session } from '@/types';
 import { formatDate, relativeTime, daysUntil } from '@/lib/utils';
 
 export default function Consulting() {
-  const { items, create, update, remove } = useSessions();
+  const { items, isError, error, invalidate, create, update, remove } = useSessions();
   const followups = useFollowups();
   const companyMap = useCompanyMap();
   const { sessionStatusValues, sessionStatusTone } = useSettings();
@@ -85,6 +86,12 @@ export default function Consulting() {
           </Button>
         }
       />
+
+      {isError && (
+        <div className="mb-4">
+          <ErrorState error={error} onRetry={invalidate} />
+        </div>
+      )}
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative max-w-xs flex-1">

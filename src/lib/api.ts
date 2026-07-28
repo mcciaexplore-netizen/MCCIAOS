@@ -5,11 +5,27 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' };
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: JSON_HEADERS });
   const text = await res.text();
-  const body = text ? JSON.parse(text) : {};
+
+  // A gateway timeout or crashed function can return HTML rather than JSON.
+  // Parsing that unguarded would surface as "Unexpected token '<'", hiding the
+  // real status, so fall back to a message that names what happened.
+  let body: { error?: string } | null = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new Error(
+        res.ok
+          ? 'Server returned an unreadable response'
+          : `Request failed (${res.status})`,
+      );
+    }
+  }
+
   if (!res.ok) {
     throw new Error(body?.error || `Request failed (${res.status})`);
   }
-  return body as T;
+  return (body ?? {}) as T;
 }
 
 export const api = {

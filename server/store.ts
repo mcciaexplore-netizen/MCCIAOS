@@ -1,31 +1,48 @@
-// Records store. Picks its backend from the environment:
-//   CONVEX_URL set  -> Convex deployment (see convex/records.ts)
-//   otherwise       -> local JSON file at server/data/records.json
-// The RecordStore interface is identical either way, so handlers.ts and every
-// caller above it are unaffected by the choice.
+// Records store. Backed by Neon Postgres when DATABASE_URL is set, otherwise
+// by a local JSON file at server/data/records.json so the app still runs with
+// zero setup.
+//
+// Both backends implement RecordStore (server/store-types.ts), so
+// server/handlers.ts never knows which one is active. The Postgres table shape
+// is defined in db/migrations.sql.
 
-import { createConvexStore } from './convex-store';
 import { fileStore } from './file-store';
+import { createPgStore } from './pg-store';
 import type { InsertInput, RecordStore, SheetName } from './store-types';
 
 export type { SheetName, StoredRecord, InsertInput } from './store-types';
 export { SHEET_ALLOWLIST, isValidSheet } from './store-types';
 
-const CONVEX_URL = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? '';
+const connectionString = process.env.DATABASE_URL?.trim();
 
-let store: RecordStore | null = null;
+function selectBackend(): RecordStore {
+  if (!connectionString) {
+    // eslint-disable-next-line no-console
+    console.info(
+      '[store] DATABASE_URL not set — using the local file store ' +
+        '(server/data/records.json). Data will not be shared between machines.',
+    );
+    return fileStore;
+  }
 
-function backend(): RecordStore {
-  if (store) return store;
-  store = CONVEX_URL ? createConvexStore(CONVEX_URL) : fileStore;
-  return store;
+  if (!/^postgres(ql)?:\/\//.test(connectionString)) {
+    throw new Error(
+      'DATABASE_URL must be a postgres:// or postgresql:// connection string. ' +
+        `Got "${connectionString.slice(0, 12)}...". ` +
+        'Unset it to fall back to the local file store.',
+    );
+  }
+
+  // eslint-disable-next-line no-console
+  console.info(`[store] using Neon Postgres (${new URL(connectionString).host})`);
+  return createPgStore(connectionString);
 }
 
-export const usingConvex = Boolean(CONVEX_URL);
+const backend: RecordStore = selectBackend();
 
-export const listBySheet = (sheet: SheetName) => backend().listBySheet(sheet);
-export const getById = (id: string) => backend().getById(id);
-export const insert = (input: InsertInput) => backend().insert(input);
+export const listBySheet = (sheet: SheetName) => backend.listBySheet(sheet);
+export const getById = (id: string) => backend.getById(id);
+export const insert = (input: InsertInput) => backend.insert(input);
 export const patch = (id: string, data: Record<string, unknown>) =>
-  backend().patch(id, data);
-export const remove = (id: string) => backend().remove(id);
+  backend.patch(id, data);
+export const remove = (id: string) => backend.remove(id);

@@ -40,18 +40,6 @@ export interface AppSettings {
   creativeStatuses: TonedOption[];
 }
 
-// The generic row shape returned by the records API. `data` holds the
-// entity-specific fields; the flattened helpers below merge id + data.
-export interface RecordRow<T = Record<string, unknown>> {
-  id: string;
-  sheet: SheetName;
-  assignedTo: string | null;
-  createdBy: string | null;
-  data: T;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface Company {
   id: string;
   companyName: string;

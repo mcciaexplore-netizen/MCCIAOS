@@ -5,8 +5,8 @@ import { DEFAULT_SETTINGS, labelsOf, toneMapOf } from '@/constants';
 import type { AppSettings } from '@/types';
 
 // The settings live in a single record on the `Settings` sheet. Storing them
-// through the same records API keeps dev (file store) and prod (Supabase)
-// behaving identically — no extra table or endpoint.
+// through the same records API keeps the file store and Neon behaving
+// identically — no extra table or endpoint.
 const QUERY_KEY = ['records', 'Settings'];
 
 type StoredSettings = AppSettings & { id: string };

@@ -8,6 +8,3 @@ dist-ssr
 .DS_Store
 *.tsbuildinfo
 server/data/*.json
-
-# Convex codegen output
-convex/_generated

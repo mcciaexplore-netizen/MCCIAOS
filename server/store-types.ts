@@ -1,5 +1,5 @@
-// Shared store contract. Both the local file store and the Convex store
-// implement RecordStore, so server/handlers.ts never knows which is active.
+// Shared store contract. Any backend implementing RecordStore can be slotted
+// in from server/store.ts, so server/handlers.ts never knows which is active.
 
 export type SheetName =
   | 'Company'

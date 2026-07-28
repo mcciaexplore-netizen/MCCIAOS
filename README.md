@@ -13,10 +13,17 @@ npm install
 npm run dev       # http://localhost:5173
 ```
 
-The app runs with **zero backend setup**: `/api/*` is served by Vite dev
-middleware and data is persisted to a local JSON file at
-`server/data/records.json` (git-ignored). The store starts **empty** — add
-records through the app. Delete that file to wipe all data.
+`/api/*` is served by Vite dev middleware. Which database it writes to depends
+on `DATABASE_URL` (see `.env.example`):
+
+- **Set** — Neon Postgres, via `server/pg-store.ts`. Run `db/migrations.sql`
+  against the database once first. This is the current setup; `.env` is
+  git-ignored, so each developer supplies their own.
+- **Unset** — a local JSON file at `server/data/records.json` (git-ignored), so
+  the app still runs with zero setup. Delete that file to wipe all data.
+
+Both backends implement the same `RecordStore` interface, so `handlers.ts` is
+identical either way.
 
 - App: `http://localhost:5173/` — open for everyone, no login.
 
@@ -28,7 +35,7 @@ Other scripts: `npm run build` (typecheck + prod build), `npm run typecheck`.
 |---|---|
 | Frontend | React 18 + TypeScript + Vite, Tailwind, React Query, react-hook-form + Zod, react-router (lazy pages), dnd-kit |
 | API | Runtime-agnostic handler in `server/handlers.ts`, shared by Vite dev middleware (`server/vite-plugin.ts`) and a Vercel catch-all (`api/[...path].ts`) |
-| Data | Single generic `records` table (JSONB `data` + `sheet` discriminator). Local dev = JSON file store; production = Supabase Postgres (`db/migrations.sql`) |
+| Data | Single generic `records` table (JSONB `data` + `sheet` discriminator). Neon Postgres when `DATABASE_URL` is set (`db/migrations.sql`), else a local JSON file store |
 
 ### Open access (no identity)
 There is no login, name-picker, or per-user identity. The app is open to
@@ -58,15 +65,15 @@ src/
   hooks/         useSheet generic + per-module hooks
   components/    AppLayout, SlideOver, Toast, ui/ primitives, FormControls
   pages/         Dashboard, Companies, Consulting, AppDevelopment, Social, Resources
-server/          store (file/Supabase), runtime-agnostic handlers, Vite plugin
+server/          store (file/Postgres), runtime-agnostic handlers, Vite plugin
 api/             Vercel function wrapper
 db/              production SQL schema + one-time migrations
 ```
 
-## Deploying to Supabase + Vercel
-1. Run `db/migrations.sql` against your Supabase Postgres.
-2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (see `.env.example`) and
-   swap the internals of `server/store.ts` to a Supabase client (the exported
-   interface is unchanged, so `handlers.ts` needs no edits).
+## Deploying to Neon + Vercel
+1. Run `db/migrations.sql` against your Neon database.
+2. Set `DATABASE_URL` as a Vercel environment variable (the same pooled Neon
+   connection string used locally). `server/store.ts` picks up Postgres
+   automatically whenever it is present.
 3. Deploy to Vercel — `vercel.json` routes `/api/*` to the catch-all function
    and everything else to the SPA.

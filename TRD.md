@@ -13,7 +13,7 @@ Technical requirements derived from PRD.md. Covers stack, non-functional require
 | Routing | react-router, lazy-loaded pages |
 | Drag-and-drop (Kanban) | dnd-kit |
 | Backend | Runtime-agnostic handlers in `server/`, shared by Vercel functions (`api/`) and Vite dev middleware |
-| Database | Supabase Postgres, single generic `records` table (JSONB) |
+| Database | Neon Postgres, single generic `records` table (JSONB) |
 | Hosting | Vercel |
 
 No new libraries should be introduced unless something in this spec is impossible with the current stack — flag it if so, rather than silently adding a dependency.
@@ -31,7 +31,7 @@ No new libraries should be introduced unless something in this spec is impossibl
            │                                │
            └───────────────┬────────────────┘
                             ▼
-                  Supabase Postgres
+                    Neon Postgres
                   (single `records` table)
 ```
 
@@ -79,7 +79,7 @@ Remove: `/api/login`, `/api/logout` (real versions). If retained as routes for c
 ## 8. Non-Functional Requirements
 
 - **No UI/visual changes.** Every new page/component must reuse existing patterns (grid/card layout, SlideOver drawer, form field components) — see UI_UX_BRIEF.md for the exact constraint list.
-- **No new backend framework or hosting change** — stays within Vercel + Supabase.
+- **No new backend framework or hosting change** — stays within Vercel + Neon.
 - **Backward compatibility for dev/prod parity**: new endpoints must work identically through Vite dev middleware and Vercel functions, per the existing runtime-agnostic handler pattern.
 - **Public endpoint hygiene**: `/api/public-intake` must have basic abuse protection (rate limiting or simple honeypot field) since it is unauthenticated and internet-facing — not full auth, just spam resistance.
 - **Idempotency on intake**: resubmission with the same email/UDYAM ID should attach to the existing Company rather than duplicating it.

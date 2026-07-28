@@ -4,11 +4,11 @@ import path from 'node:path';
 import { apiMiddleware } from './server/vite-plugin';
 
 export default defineConfig(({ mode }) => {
-  // The API middleware runs in this Node process and reads process.env
-  // (server/store.ts picks its backend from CONVEX_URL). Vite only exposes
-  // .env to client code by default, so copy the server-side keys across.
+  // The API middleware runs in this Node process and reads process.env.
+  // Vite only exposes .env to client code by default, so copy the
+  // server-side keys across.
   const env = loadEnv(mode, process.cwd(), '');
-  for (const key of ['CONVEX_URL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']) {
+  for (const key of ['DATABASE_URL']) {
     if (env[key] && !process.env[key]) process.env[key] = env[key];
   }
 

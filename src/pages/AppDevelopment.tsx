@@ -26,6 +26,7 @@ import {
   Button,
   Card,
   EmptyState,
+  ErrorState,
   Field,
   Input,
   Select,
@@ -51,7 +52,7 @@ import type { Company, Project, ProjectStage } from '@/types';
 import { cn, relativeTime } from '@/lib/utils';
 
 export default function AppDevelopment() {
-  const { items, create, update, remove } = useProjects();
+  const { items, isError, error, invalidate, create, update, remove } = useProjects();
   const { create: createCompany } = useCompanies();
   const companyMap = useCompanyMap();
   const { projectStageValues, projectStageTone } = useSettings();
@@ -133,6 +134,12 @@ export default function AppDevelopment() {
           </>
         }
       />
+
+      {isError && (
+        <div className="mb-4">
+          <ErrorState error={error} onRetry={invalidate} />
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <AssigneeFilterSelect

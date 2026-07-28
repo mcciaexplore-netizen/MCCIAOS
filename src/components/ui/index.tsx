@@ -201,6 +201,37 @@ export function FilterPill({
 }
 
 // ---- Empty state ----------------------------------------------------------
+// Shown when a list query fails. Without this a failed fetch renders as an
+// empty list, which reads as "no records yet" — a silent failure.
+export function ErrorState({
+  title = 'Could not load data',
+  error,
+  onRetry,
+}: {
+  title?: string;
+  error?: Error | null;
+  onRetry?: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center justify-center rounded-xl border border-dashed border-rose-300 bg-rose-50/50 px-6 py-16 text-center dark:border-rose-900 dark:bg-rose-950/20"
+    >
+      <p className="text-sm font-medium text-rose-700 dark:text-rose-300">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-rose-500 dark:text-rose-400">
+        {error?.message || 'The server did not respond.'}
+      </p>
+      {onRetry && (
+        <div className="mt-4">
+          <Button variant="secondary" size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EmptyState({
   icon,
   title,

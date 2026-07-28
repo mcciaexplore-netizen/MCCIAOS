@@ -1,5 +1,5 @@
-// Zero-setup local store backed by a JSON file. Used whenever CONVEX_URL is
-// not set, so the app still runs with no external dependencies.
+// Zero-setup local store backed by a JSON file, so the app runs with no
+// external dependencies.
 
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

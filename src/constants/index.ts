@@ -1,14 +1,4 @@
-import type { AppSettings, SheetName, TonedOption } from '@/types';
-
-export const SHEET_NAMES: SheetName[] = [
-  'Company',
-  'Session',
-  'Followup',
-  'Project',
-  'Creative',
-  'Resource',
-  'Settings',
-];
+import type { AppSettings, TonedOption } from '@/types';
 
 // Every tone the Badge component knows how to render. The Settings page
 // offers exactly these when picking a color for a stage or status.

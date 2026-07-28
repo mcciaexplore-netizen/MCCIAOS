@@ -17,16 +17,29 @@ export default async function handler(req: VercelReq, res: ServerResponse) {
     headers[k.toLowerCase()] = Array.isArray(v) ? v.join(',') : v;
   }
 
-  const result = await handleApi({
-    method: req.method ?? 'GET',
-    pathname: parsed.pathname,
-    query: parsed.searchParams,
-    headers,
-    body: req.body,
-    ip: (headers['x-forwarded-for']?.split(',')[0] ?? 'unknown').trim(),
-  });
+  try {
+    const result = await handleApi({
+      method: req.method ?? 'GET',
+      pathname: parsed.pathname,
+      query: parsed.searchParams,
+      headers,
+      body: req.body,
+      ip: (headers['x-forwarded-for']?.split(',')[0] ?? 'unknown').trim(),
+    });
 
-  res.statusCode = result.status;
+    send(res, result.status, result.body);
+  } catch (err) {
+    // Mirrors the dev middleware: an unhandled failure (most likely the
+    // database being unreachable) must still come back as JSON, because the
+    // client parses every response as JSON.
+    // eslint-disable-next-line no-console
+    console.error('[api] error', err);
+    send(res, 500, { error: 'Internal server error' });
+  }
+}
+
+function send(res: ServerResponse, status: number, body: unknown) {
+  res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(result.body));
+  res.end(JSON.stringify(body));
 }

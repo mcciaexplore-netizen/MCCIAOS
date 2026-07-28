@@ -116,8 +116,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     const schema = schemaForSheet[body.sheet as SheetName];
     const created: unknown[] = [];
     const errors: { row: number; issues: unknown }[] = [];
-    // Sequential rather than forEach: inserts are async once the store is
-    // backed by Convex.
+    // Sequential rather than forEach: store inserts are async.
     const incoming = body.records ?? [];
     for (let i = 0; i < incoming.length; i++) {
       const parsed = schema.safeParse(incoming[i]);
