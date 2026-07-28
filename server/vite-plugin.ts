@@ -31,7 +31,7 @@ export function apiMiddleware(): Plugin {
         try {
           // Load the handler through Vite so '@' aliases + TS resolve.
           const mod = await server.ssrLoadModule('/server/handlers.ts');
-          const handleApi = mod.handleApi as typeof import('./handlers').handleApi;
+          const handleApi = mod.handleApi as typeof import('./handlers.js').handleApi;
 
           const parsed = new URL(url, 'http://localhost');
           const headers: Record<string, string | undefined> = {};

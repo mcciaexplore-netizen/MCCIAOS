@@ -10,7 +10,7 @@ import type {
   RecordStore,
   SheetName,
   StoredRecord,
-} from './store-types';
+} from './store-types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, 'data');

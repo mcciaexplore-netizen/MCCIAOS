@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
-import type { SheetName } from '@/types';
+import { BADGE_TONES, DEFAULT_SETTINGS } from '../constants/index.js';
+import type { SheetName } from '../types/index.js';
 
 // Vocabulary fields (status, stage, lead source, ...) are configurable on the
 // Settings page, so the server can only check that a non-empty string was

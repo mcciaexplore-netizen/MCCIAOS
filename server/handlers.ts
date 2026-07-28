@@ -2,7 +2,7 @@
 // middleware (server/vite-plugin.ts) and the Vercel functions (api/*.ts),
 // so dev and prod behave identically (TRD.md section 8).
 
-import { importSchemaForSheet, schemaForSheet } from '@/schemas';
+import { importSchemaForSheet, schemaForSheet } from '../src/schemas/index.js';
 import {
   insert,
   isValidSheet,
@@ -10,7 +10,7 @@ import {
   patch,
   remove,
   type SheetName,
-} from './store';
+} from './store.js';
 
 export interface ApiRequest {
   method: string;

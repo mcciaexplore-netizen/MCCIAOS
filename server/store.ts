@@ -6,12 +6,12 @@
 // server/handlers.ts never knows which one is active. The Postgres table shape
 // is defined in db/migrations.sql.
 
-import { fileStore } from './file-store';
-import { createPgStore } from './pg-store';
-import type { InsertInput, RecordStore, SheetName } from './store-types';
+import { fileStore } from './file-store.js';
+import { createPgStore } from './pg-store.js';
+import type { InsertInput, RecordStore, SheetName } from './store-types.js';
 
-export type { SheetName, StoredRecord, InsertInput } from './store-types';
-export { SHEET_ALLOWLIST, isValidSheet } from './store-types';
+export type { SheetName, StoredRecord, InsertInput } from './store-types.js';
+export { SHEET_ALLOWLIST, isValidSheet } from './store-types.js';
 
 const connectionString = process.env.DATABASE_URL?.trim();
 

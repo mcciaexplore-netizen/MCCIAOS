@@ -1,7 +1,7 @@
 // Vercel catch-all function. Delegates every /api/* route to the same
 // runtime-agnostic handler used by the Vite dev middleware.
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { handleApi } from '../server/handlers';
+import { handleApi } from '../server/handlers.js';
 
 interface VercelReq extends IncomingMessage {
   method?: string;

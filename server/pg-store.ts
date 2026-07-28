@@ -10,7 +10,7 @@ import type {
   RecordStore,
   SheetName,
   StoredRecord,
-} from './store-types';
+} from './store-types.js';
 
 // snake_case columns in Postgres, camelCase in the app.
 interface Row {
