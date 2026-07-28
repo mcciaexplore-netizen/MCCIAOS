@@ -43,6 +43,33 @@ import type { SheetName } from '@/types';
 // chunking also gives the progress counter something to report.
 const CHUNK_SIZE = 40;
 
+/**
+ * POST one chunk, retrying a couple of times before giving up.
+ *
+ * Neon suspends an idle database and the first request after that can time out
+ * connecting. Without a retry a single blip half way through a long import
+ * leaves the sheet partly loaded, which is far more annoying to clean up than
+ * waiting a second.
+ */
+async function sendChunk(
+  sheet: SheetName,
+  chunk: unknown[],
+  attempts = 3,
+): Promise<{ created: number; errors: unknown[] }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await api.bulk(sheet, chunk);
+    } catch (err) {
+      lastError = err;
+      if (attempt < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 600 * 2 ** attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
 interface PreparedRow extends ImportRow {
   /** 1-based row number in the user's file, for error messages. */
   line: number;
@@ -186,7 +213,7 @@ export function DataTransfer({ sheet }: { sheet: SheetName }) {
     try {
       for (let i = 0; i < valid.length; i += CHUNK_SIZE) {
         const chunk = valid.slice(i, i + CHUNK_SIZE).map((r) => r.data);
-        const res = await api.bulk(sheet, chunk);
+        const res = await sendChunk(sheet, chunk);
         created += res.created;
         setProgress(Math.min(i + CHUNK_SIZE, valid.length));
       }
