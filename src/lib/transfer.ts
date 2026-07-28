@@ -83,11 +83,13 @@ export const TRANSFER_SPECS: Record<string, TransferSpec> = {
     filename: 'companies',
     columns: [
       { key: 'companyName', label: 'Company Name', required: true, aliases: ['company', 'firm', 'business'], example: 'Acme Traders' },
-      { key: 'contactName', label: 'Contact Name', required: true, aliases: ['name', 'person'], example: 'Priya Sharma' },
-      { key: 'contactEmail', label: 'Email', required: true, aliases: ['contactEmail', 'e-mail', 'mail'], example: 'priya@acme.in' },
-      { key: 'contactPhone', label: 'Phone', required: true, aliases: ['contactPhone', 'mobile', 'contact number'], example: '9876543210' },
+      { key: 'contactName', label: 'Contact Name', required: true, aliases: ['name', 'person', 'person name', 'contact person', 'proprietor'], example: 'Priya Sharma' },
+      { key: 'contactEmail', label: 'Email', required: true, aliases: ['contactEmail', 'e-mail', 'mail', 'email id', 'email address', 'mail id'], example: 'priya@acme.in' },
+      // "Contact" on its own means the phone number in every MSME sheet seen so
+      // far; the person is spelled out as "Person Name" / "Contact Person".
+      { key: 'contactPhone', label: 'Phone', required: true, aliases: ['contactPhone', 'mobile', 'contact number', 'contact', 'contact no', 'phone no', 'mobile no'], example: '9876543210' },
       { key: 'contactRole', label: 'Role', aliases: ['designation', 'title'], example: 'Owner' },
-      { key: 'udyamNumber', label: 'UDYAM Number', aliases: ['udyam'], example: 'UDYAM-MH-26-0001234' },
+      { key: 'udyamNumber', label: 'UDYAM Number', aliases: ['udyam', 'udyam no', 'udyam reg no', 'udyam registration'], example: 'UDYAM-MH-26-0001234' },
       { key: 'district', label: 'District', example: 'Pune' },
       { key: 'industry', label: 'Industry', aliases: ['sector'], example: 'Manufacturing' },
       { key: 'membershipStatus', label: 'Membership', vocab: 'membershipStatuses', example: 'Member' },

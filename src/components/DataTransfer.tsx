@@ -14,7 +14,7 @@ import {
   Loader2,
   Upload,
 } from 'lucide-react';
-import { Badge, Button, Modal } from '@/components/ui';
+import { Badge, Button, Modal, Select } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useCompanies } from '@/hooks';
 import { api } from '@/lib/api';
@@ -48,17 +48,24 @@ interface PreparedRow extends ImportRow {
   line: number;
 }
 
+/** The file as read, before any column has been assigned a meaning. */
+interface Source {
+  rows: Record<string, string>[];
+  headers: string[];
+  fileName: string;
+}
+
 export function DataTransfer({ sheet }: { sheet: SheetName }) {
   const spec = TRANSFER_SPECS[sheet];
   const ctx = useTransferContext();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [records, setRecords] = useState<Record<string, unknown>[]>([]);
   const [exportOpen, setExportOpen] = useState(false);
-  const [prepared, setPrepared] = useState<PreparedRow[] | null>(null);
-  const [fileName, setFileName] = useState('');
-  const [unmatched, setUnmatched] = useState<string[]>([]);
+  const [source, setSource] = useState<Source | null>(null);
+  // Manual column choices, overriding the automatic match. Keyed by field name;
+  // '' means "ignore this field" even if a header would have matched.
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
 
@@ -104,44 +111,61 @@ export function DataTransfer({ sheet }: { sheet: SheetName }) {
 
     setBusy(true);
     try {
-      const raw = await readSpreadsheet(file);
-      if (raw.length === 0) {
+      const rows = await readSpreadsheet(file);
+      if (rows.length === 0) {
         toast('No data rows found in that file', 'error');
         return;
       }
-
-      const headers = Object.keys(raw[0]);
-      const mapping = matchHeaders(headers, spec.columns);
-      const matched = new Set(Object.values(mapping).filter(Boolean));
-
-      const rows: PreparedRow[] = raw.map((r, i) => {
-        const built = buildImportRow(r, spec, mapping, ctx);
-        if (built.error) return { ...built, line: i + 2 };
-        // Same schema the server runs, so a row that passes here will insert.
-        const parsed = schemaForSheet[sheet].safeParse(built.data);
-        if (!parsed.success) {
-          const first = parsed.error.issues[0];
-          const field = String(first.path[0] ?? '');
-          const label = spec.columns.find((c) => c.key === field)?.label ?? field;
-          return {
-            ...built,
-            line: i + 2,
-            error: label ? `${label}: ${first.message}` : first.message,
-          };
-        }
-        return { ...built, data: parsed.data as Record<string, unknown>, line: i + 2 };
-      });
-
-      setRecords(raw as Record<string, unknown>[]);
-      setFileName(file.name);
-      setUnmatched(headers.filter((h) => h && !matched.has(h)));
-      setPrepared(rows);
+      // Headers come from the union of all rows, not just the first: a sheet
+      // whose first row leaves trailing columns blank would otherwise hide them
+      // from the mapping dropdowns.
+      const headers = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter(Boolean);
+      setOverrides({});
+      setSource({ rows, headers, fileName: file.name });
     } catch (err) {
       toast((err as Error).message || 'Could not read that file', 'error');
     } finally {
       setBusy(false);
     }
   }
+
+  // Automatic match, then the user's manual choices on top. Recomputed as the
+  // mapping changes so the preview and the error list stay live.
+  const mapping = useMemo(() => {
+    if (!source) return {};
+    const m = matchHeaders(source.headers, spec.columns);
+    for (const [key, header] of Object.entries(overrides)) {
+      m[key] = header || undefined;
+    }
+    return m;
+  }, [source, overrides, spec]);
+
+  const prepared = useMemo<PreparedRow[] | null>(() => {
+    if (!source) return null;
+    return source.rows.map((r, i) => {
+      const built = buildImportRow(r, spec, mapping, ctx);
+      if (built.error) return { ...built, line: i + 2 };
+      // Same schema the server runs, so a row that passes here will insert.
+      const parsed = schemaForSheet[sheet].safeParse(built.data);
+      if (!parsed.success) {
+        const first = parsed.error.issues[0];
+        const field = String(first.path[0] ?? '');
+        const label = spec.columns.find((c) => c.key === field)?.label ?? field;
+        return {
+          ...built,
+          line: i + 2,
+          error: label ? `${label}: ${first.message}` : first.message,
+        };
+      }
+      return { ...built, data: parsed.data as Record<string, unknown>, line: i + 2 };
+    });
+  }, [source, mapping, spec, ctx, sheet]);
+
+  const unmatched = useMemo(() => {
+    if (!source) return [];
+    const used = new Set(Object.values(mapping).filter(Boolean));
+    return source.headers.filter((h) => !used.has(h));
+  }, [source, mapping]);
 
   const valid = useMemo(
     () => (prepared ?? []).filter((r) => !r.error),
@@ -176,9 +200,8 @@ export function DataTransfer({ sheet }: { sheet: SheetName }) {
   }
 
   function close() {
-    setPrepared(null);
-    setRecords([]);
-    setUnmatched([]);
+    setSource(null);
+    setOverrides({});
     setProgress(0);
   }
 
@@ -231,11 +254,11 @@ export function DataTransfer({ sheet }: { sheet: SheetName }) {
       </div>
 
       <Modal
-        open={prepared !== null}
+        open={source !== null}
         onClose={close}
         size="xl"
         title={`Import ${spec.label}`}
-        description={fileName}
+        description={source?.fileName}
         footer={
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-slate-500">
@@ -258,8 +281,13 @@ export function DataTransfer({ sheet }: { sheet: SheetName }) {
         <ImportPreview
           spec={spec}
           rows={prepared ?? []}
-          raw={records}
+          rowCount={source?.rows.length ?? 0}
+          headers={source?.headers ?? []}
+          mapping={mapping}
           unmatched={unmatched}
+          onMap={(key, header) =>
+            setOverrides((o) => ({ ...o, [key]: header }))
+          }
         />
       </Modal>
     </>
@@ -288,17 +316,28 @@ const PREVIEW_LIMIT = 6;
 function ImportPreview({
   spec,
   rows,
-  raw,
+  rowCount,
+  headers,
+  mapping,
   unmatched,
+  onMap,
 }: {
   spec: TransferSpec;
   rows: PreparedRow[];
-  raw: Record<string, unknown>[];
+  rowCount: number;
+  headers: string[];
+  mapping: Record<string, string | undefined>;
   unmatched: string[];
+  onMap: (key: string, header: string) => void;
 }) {
   const problems = rows.filter((r) => r.error);
   const warned = rows.filter((r) => !r.error && r.warnings.length > 0);
   const ok = rows.length - problems.length;
+
+  const missingRequired = spec.columns.filter((c) => c.required && !mapping[c.key]);
+  // Opened automatically when a required field has nowhere to read from —
+  // that is the one case the user cannot import their way out of.
+  const [mapOpen, setMapOpen] = useState(missingRequired.length > 0);
 
   return (
     <div className="space-y-4">
@@ -315,15 +354,40 @@ function ImportPreview({
           <Badge tone="amber">{warned.length} adjusted</Badge>
         )}
         <span className="text-xs text-slate-400">
-          {raw.length} row{raw.length === 1 ? '' : 's'} read
+          {rowCount} row{rowCount === 1 ? '' : 's'} read
         </span>
+        <button
+          onClick={() => setMapOpen((o) => !o)}
+          className="ml-auto text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+        >
+          {mapOpen ? 'Hide' : 'Change'} column mapping
+        </button>
       </div>
 
-      {unmatched.length > 0 && (
+      {missingRequired.length > 0 && (
+        <p className="rounded-lg border border-rose-200 bg-rose-50/50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-300">
+          No column found for{' '}
+          <span className="font-medium">
+            {missingRequired.map((c) => c.label).join(', ')}
+          </span>
+          . Pick the matching column below — every row fails until you do.
+        </p>
+      )}
+
+      {mapOpen && (
+        <ColumnMapper
+          spec={spec}
+          headers={headers}
+          mapping={mapping}
+          onMap={onMap}
+        />
+      )}
+
+      {!mapOpen && unmatched.length > 0 && (
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60">
           Ignored column{unmatched.length === 1 ? '' : 's'}:{' '}
-          <span className="font-medium">{unmatched.join(', ')}</span>. Rename to
-          match a field, or leave as is.
+          <span className="font-medium">{unmatched.join(', ')}</span>. Use
+          &ldquo;Change column mapping&rdquo; to bring one in.
         </p>
       )}
 
@@ -381,6 +445,73 @@ function ImportPreview({
             r.warnings.map((w) => `Row ${r.line} — ${w}`),
           )}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Lets the user point any field at any column in their file. This is the
+ * escape hatch that makes an unseen sheet layout importable without waiting
+ * for a new alias to be added to the spec.
+ */
+function ColumnMapper({
+  spec,
+  headers,
+  mapping,
+  onMap,
+}: {
+  spec: TransferSpec;
+  headers: string[];
+  mapping: Record<string, string | undefined>;
+  onMap: (key: string, header: string) => void;
+}) {
+  // A header feeding two fields at once is almost always a mistake, so flag it
+  // rather than silently importing the same value into both.
+  const used = Object.values(mapping).filter(Boolean) as string[];
+  const duplicated = new Set(used.filter((h, i) => used.indexOf(h) !== i));
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+      <p className="mb-2 text-xs text-slate-500">
+        Match each field to a column from your file.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {spec.columns.map((c) => {
+          const value = mapping[c.key] ?? '';
+          return (
+            <label key={c.key} className="flex items-center gap-2">
+              <span className="w-28 shrink-0 truncate text-xs text-slate-600 dark:text-slate-300">
+                {c.label}
+                {c.required && <span className="text-rose-500">*</span>}
+              </span>
+              <Select
+                value={value}
+                onChange={(e) => onMap(c.key, e.target.value)}
+                className={
+                  'py-1 text-xs ' +
+                  (c.required && !value
+                    ? 'border-rose-300 dark:border-rose-800'
+                    : duplicated.has(value)
+                      ? 'border-amber-300 dark:border-amber-800'
+                      : '')
+                }
+              >
+                <option value="">— not imported —</option>
+                {headers.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          );
+        })}
+      </div>
+      {duplicated.size > 0 && (
+        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+          {[...duplicated].join(', ')} feeds more than one field.
+        </p>
       )}
     </div>
   );
