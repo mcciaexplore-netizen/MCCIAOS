@@ -11,6 +11,7 @@
 import PDFDocument from 'pdfkit';
 import writeXlsxFile from 'write-excel-file/node';
 import { toCsv } from '../src/lib/csv.js';
+import { logoBytes } from '../src/lib/brand.js';
 import {
   getBreakdown,
   getLineItems,
@@ -273,18 +274,42 @@ async function buildPdf(period: PeriodInput): Promise<Uint8Array> {
 
   // --- Cover header
   doc.rect(0, 0, doc.page.width, 104).fill(NAVY);
+
+  // The logo is the same embedded asset the sidebar uses (src/lib/brand.ts),
+  // so there is no file to ship alongside the function. It sits on a white
+  // plate because the wordmark's blue would disappear into the navy band.
+  const logo = logoBytes();
+  let textLeft = PAGE_MARGIN;
+  if (logo) {
+    const plateW = 132;
+    const plateH = 44;
+    doc.roundedRect(PAGE_MARGIN, 30, plateW, plateH, 4).fill('#FFFFFF');
+    try {
+      doc.image(Buffer.from(logo), PAGE_MARGIN + 8, 36, {
+        fit: [plateW - 16, plateH - 12],
+        align: 'center',
+        valign: 'center',
+      });
+      textLeft = PAGE_MARGIN + plateW + 16;
+    } catch {
+      // An unreadable image must not take the whole report down; fall back to
+      // the wordmark heading alone.
+      textLeft = PAGE_MARGIN;
+    }
+  }
+
   doc
     .font(FONT_HEAD)
-    .fontSize(22)
+    .fontSize(logo ? 18 : 22)
     .fillColor('#FFFFFF')
-    .text('MCCIA Applied AI Studio', PAGE_MARGIN, 30);
+    .text('MCCIA Applied AI Studio', textLeft, logo ? 34 : 30);
   doc
     .font(FONT_BODY)
     .fontSize(11)
     .fillColor('#C7D2E0')
-    .text('Analytics & Reporting', PAGE_MARGIN, 60);
+    .text('Analytics & Reporting', textLeft, logo ? 58 : 60);
   doc.fontSize(9).fillColor('#9FB3C8')
-    .text(`Period ${periodLabel(s)}  ·  generated ${istStamp()} IST`, PAGE_MARGIN, 78);
+    .text(`Period ${periodLabel(s)}  ·  generated ${istStamp()} IST`, textLeft, logo ? 76 : 78);
   doc.y = 132;
 
   // --- Executive summary

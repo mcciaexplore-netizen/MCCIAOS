@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Plus,
   Trash2,
@@ -6,12 +7,20 @@ import {
   ChevronDown,
   RotateCcw,
   Check,
+  Users,
+  Building2,
+  MessageSquareText,
+  KanbanSquare,
+  Megaphone,
+  Link2,
+  type LucideIcon,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { Badge, Button, Card, Input, Select } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
+import { cn } from '@/lib/utils';
 import type { AppSettings, TonedOption } from '@/types';
 
 // Pull just the persisted keys out of the context value, dropping the derived
@@ -39,10 +48,107 @@ function move<T>(list: T[], from: number, to: number): T[] {
   return next;
 }
 
+// Every editor, grouped by the page it configures.
+//
+// These used to render all at once in a two-column grid — ten cards and around
+// sixty inputs on one screen, with no signal about which list drove which page.
+// Grouping them by destination means you open the section for the page you are
+// changing and see only its lists.
+interface Editor {
+  key: keyof AppSettings;
+  title: string;
+  description: string;
+  kind: 'plain' | 'toned';
+  placeholder?: string;
+}
+
+interface Group {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  blurb: string;
+  editors: Editor[];
+}
+
+const GROUPS: Group[] = [
+  {
+    id: 'team',
+    label: 'Team',
+    icon: Users,
+    blurb: 'Who work can be assigned to.',
+    editors: [
+      {
+        key: 'teamMembers',
+        title: 'Team members',
+        description: 'The roster behind every “Assigned to” picker and assignee filter.',
+        kind: 'plain',
+        placeholder: 'Name',
+      },
+    ],
+  },
+  {
+    id: 'companies',
+    label: 'Companies',
+    icon: Building2,
+    blurb: 'Vocabularies used on the Companies page.',
+    editors: [
+      { key: 'companyStatuses', title: 'Company statuses', description: 'Lifecycle of an MSME record.', kind: 'toned' },
+      { key: 'leadSources', title: 'Lead sources', description: 'How a company first reached you.', kind: 'plain', placeholder: 'Source' },
+      { key: 'businessScales', title: 'Business scales', description: 'MSME size bands.', kind: 'plain', placeholder: 'Scale' },
+      { key: 'membershipStatuses', title: 'Membership statuses', description: 'MCCIA membership state of a company.', kind: 'plain', placeholder: 'Status' },
+    ],
+  },
+  {
+    id: 'consulting',
+    label: 'Consulting',
+    icon: MessageSquareText,
+    blurb: 'Vocabularies used on the Consulting page.',
+    editors: [
+      { key: 'sessionStatuses', title: 'Session statuses', description: 'Status values available on a consulting session.', kind: 'toned' },
+    ],
+  },
+  {
+    id: 'projects',
+    label: 'App Development',
+    icon: KanbanSquare,
+    blurb: 'The Kanban board on the App Development page.',
+    editors: [
+      { key: 'projectStages', title: 'Kanban stages', description: 'Board columns, in order. New companies enter at the first column.', kind: 'toned' },
+    ],
+  },
+  {
+    id: 'social',
+    label: 'Social',
+    icon: Megaphone,
+    blurb: 'Vocabularies used on the Social page.',
+    editors: [
+      { key: 'creativeStatuses', title: 'Post statuses', description: 'Status values available on a creative.', kind: 'toned' },
+      { key: 'creativePlatforms', title: 'Platforms', description: 'Channels you can file a creative under.', kind: 'plain', placeholder: 'Platform' },
+    ],
+  },
+  {
+    id: 'resources',
+    label: 'Resources',
+    icon: Link2,
+    blurb: 'Vocabularies used on the Resources page.',
+    editors: [
+      { key: 'resourceCategories', title: 'Categories', description: 'Buckets on the Resources page.', kind: 'plain', placeholder: 'Category' },
+    ],
+  },
+];
+
 export default function Settings() {
   const settings = useSettings();
   const save = useSaveSettings();
   const { toast } = useToast();
+  const [params, setParams] = useSearchParams();
+
+  const tab = GROUPS.find((g) => g.id === params.get('tab')) ?? GROUPS[0];
+  const selectTab = (id: string) => {
+    const p = new URLSearchParams(params);
+    p.set('tab', id);
+    setParams(p, { replace: true });
+  };
 
   const [draft, setDraft] = useState<AppSettings>(() => toAppSettings(settings));
   const [dirty, setDirty] = useState(false);
@@ -58,16 +164,23 @@ export default function Settings() {
     setDirty(true);
   }
 
+  /** Groups holding a blank entry, so the save error can point at the tab. */
+  function groupsWithBlanks(): Group[] {
+    return GROUPS.filter((g) =>
+      g.editors.some((e) => {
+        const v = draft[e.key] as (string | TonedOption)[];
+        return v.length === 0 || v.some((x) => (typeof x === 'string' ? !x.trim() : !x.label.trim()));
+      }),
+    );
+  }
+
   async function handleSave() {
-    const empty = (Object.keys(draft) as (keyof AppSettings)[]).filter((k) => {
-      const v = draft[k] as (string | TonedOption)[];
-      return (
-        v.length === 0 ||
-        v.some((e) => (typeof e === 'string' ? !e.trim() : !e.label.trim()))
-      );
-    });
-    if (empty.length > 0) {
-      toast('Remove blank entries before saving', 'error');
+    const bad = groupsWithBlanks();
+    if (bad.length > 0) {
+      // Naming the section matters now that only one is on screen — otherwise
+      // the offending blank could be behind a tab you cannot see.
+      toast(`Remove blank entries in ${bad.map((g) => g.label).join(', ')}`, 'error');
+      selectTab(bad[0].id);
       return;
     }
     try {
@@ -91,6 +204,8 @@ export default function Settings() {
     toast('Changes discarded');
   }
 
+  const blanks = new Set(groupsWithBlanks().map((g) => g.id));
+
   return (
     <div>
       <PageHeader
@@ -103,83 +218,73 @@ export default function Settings() {
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <TonedListEditor
-          title="Kanban stages"
-          description="Columns on the App Development board, in order. The first column is where new companies are added."
-          items={draft.projectStages}
-          onChange={(v) => patch('projectStages', v)}
-        />
-        <ListEditor
-          title="Team members"
-          description="The roster behind every “Assigned to” picker and assignee filter."
-          items={draft.teamMembers}
-          onChange={(v) => patch('teamMembers', v)}
-          placeholder="Name"
-        />
-        <TonedListEditor
-          title="Company statuses"
-          description="Lifecycle of an MSME record on the Companies page."
-          items={draft.companyStatuses}
-          onChange={(v) => patch('companyStatuses', v)}
-        />
-        <TonedListEditor
-          title="Consulting session statuses"
-          description="Status values available on the Consulting page."
-          items={draft.sessionStatuses}
-          onChange={(v) => patch('sessionStatuses', v)}
-        />
-        <TonedListEditor
-          title="Social post statuses"
-          description="Status values available on the Social page."
-          items={draft.creativeStatuses}
-          onChange={(v) => patch('creativeStatuses', v)}
-        />
-        <ListEditor
-          title="Social platforms"
-          description="Channels you can file a creative under."
-          items={draft.creativePlatforms}
-          onChange={(v) => patch('creativePlatforms', v)}
-          placeholder="Platform"
-        />
-        <ListEditor
-          title="Lead sources"
-          description="How a company first reached you."
-          items={draft.leadSources}
-          onChange={(v) => patch('leadSources', v)}
-          placeholder="Source"
-        />
-        <ListEditor
-          title="Business scales"
-          description="MSME size bands."
-          items={draft.businessScales}
-          onChange={(v) => patch('businessScales', v)}
-          placeholder="Scale"
-        />
-        <ListEditor
-          title="Membership statuses"
-          description="MCCIA membership state of a company."
-          items={draft.membershipStatuses}
-          onChange={(v) => patch('membershipStatuses', v)}
-          placeholder="Status"
-        />
-        <ListEditor
-          title="Resource categories"
-          description="Buckets on the Resources page."
-          items={draft.resourceCategories}
-          onChange={(v) => patch('resourceCategories', v)}
-          placeholder="Category"
-        />
+      <div className="grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)]">
+        {/* Section rail: vertical on desktop, a scrollable row on mobile. */}
+        <nav
+          aria-label="Settings sections"
+          className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
+        >
+          {GROUPS.map((g) => {
+            const active = g.id === tab.id;
+            return (
+              <button
+                key={g.id}
+                onClick={() => selectTab(g.id)}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors lg:w-full',
+                  active
+                    ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
+                )}
+              >
+                <g.icon className="h-4 w-4 shrink-0" />
+                <span className="truncate">{g.label}</span>
+                {blanks.has(g.id) && (
+                  <span
+                    className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+                    title="Has a blank entry"
+                  />
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div>
+          <p className="mb-3 text-sm text-slate-500">{tab.blurb}</p>
+          <div className="space-y-4">
+            {tab.editors.map((e) =>
+              e.kind === 'toned' ? (
+                <TonedListEditor
+                  key={e.key}
+                  title={e.title}
+                  description={e.description}
+                  items={draft[e.key] as TonedOption[]}
+                  onChange={(v) => patch(e.key, v as AppSettings[typeof e.key])}
+                />
+              ) : (
+                <ListEditor
+                  key={e.key}
+                  title={e.title}
+                  description={e.description}
+                  placeholder={e.placeholder ?? 'Value'}
+                  items={draft[e.key] as string[]}
+                  onChange={(v) => patch(e.key, v as AppSettings[typeof e.key])}
+                />
+              ),
+            )}
+          </div>
+          <p className="mt-4 text-xs text-slate-400">
+            Renaming an entry does not rewrite records that already use the old
+            value — those keep their stored label until you edit them.
+          </p>
+        </div>
       </div>
 
-      <p className="mt-6 text-xs text-slate-400">
-        Renaming an entry does not rewrite records that already use the old
-        value — those keep their stored label until you edit them.
-      </p>
-
-      {/* Save stays reachable while scrolling — the page is taller than the
-          viewport, so the header button alone is not enough. */}
-      <div className="sticky bottom-4 z-20 mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
+      {/* Save stays reachable while scrolling, and reports unsaved changes
+          across every section, not just the one on screen. */}
+      <div className="sticky bottom-4 z-20 mt-5 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
         <p className="text-sm text-slate-500">
           {dirty ? (
             <span className="font-medium text-amber-600 dark:text-amber-400">
@@ -190,12 +295,7 @@ export default function Settings() {
           )}
         </p>
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleDiscard}
-            disabled={!dirty || save.isPending}
-          >
+          <Button variant="secondary" size="sm" onClick={handleDiscard} disabled={!dirty || save.isPending}>
             Discard
           </Button>
           <Button size="sm" onClick={handleSave} disabled={!dirty || save.isPending}>
@@ -299,6 +399,7 @@ function ListEditor({
       {items.map((item, i) => (
         <div key={i} className="flex items-center gap-1.5">
           <Input
+            className="min-w-0 flex-1"
             value={item}
             placeholder={placeholder}
             onChange={(e) =>
@@ -337,6 +438,7 @@ function TonedListEditor({
       {items.map((item, i) => (
         <div key={i} className="flex items-center gap-1.5">
           <Input
+            className="min-w-0 flex-1"
             value={item.label}
             placeholder="Label"
             onChange={(e) =>
@@ -347,9 +449,10 @@ function TonedListEditor({
               )
             }
           />
+          <div className="w-24 shrink-0 sm:w-28">
           <Select
             value={item.tone}
-            className="w-28 shrink-0"
+            aria-label="Colour"
             onChange={(e) =>
               onChange(
                 items.map((v, j) =>
@@ -364,6 +467,7 @@ function TonedListEditor({
               </option>
             ))}
           </Select>
+          </div>
           <Badge tone={item.tone} className="hidden shrink-0 sm:inline-flex">
             {item.label || 'preview'}
           </Badge>

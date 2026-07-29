@@ -1,46 +1,66 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Bell, Moon, Sun, Menu, X } from 'lucide-react';
+import { Bell, Moon, Sun, Menu, X, SlidersHorizontal } from 'lucide-react';
 import { NAV_ITEMS } from './navigation';
 import { useTheme } from '@/lib/theme';
 import { useFollowups } from '@/hooks';
 import { cn, daysUntil } from '@/lib/utils';
-
-// Drop the MCCIA wordmark at this path to use it. Swap the extension here if
-// you have an SVG — nothing else needs to change. Until the file exists the
-// lettermark below renders instead, so a missing asset never shows a broken
-// image icon.
-const LOGO_SRC = '/logo.png';
+import { APP_NAME, APP_TAGLINE, LOGO_DATA_URI, hasLogo } from '@/lib/brand';
 
 function Brand() {
-  const [logoFailed, setLogoFailed] = useState(false);
-
+  // Install the real wordmark with `npm run logo -- path/to/logo.png`; until
+  // then this renders a lettermark rather than a broken image.
   return (
-    <div className="flex items-center gap-2.5 px-2">
-      {logoFailed ? (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-          M
-        </div>
-      ) : (
+    <div className="flex min-w-0 items-center gap-2.5">
+      {hasLogo() ? (
         // The wordmark's blue sits low-contrast on the dark sidebar, so in dark
         // mode it gets a white plate rather than being recoloured — the brand
         // colours stay correct in both themes.
-        <div className="shrink-0 rounded dark:bg-white dark:px-1.5 dark:py-1">
+        <div className="shrink-0 rounded dark:bg-white dark:px-1 dark:py-0.5">
           <img
-            src={LOGO_SRC}
+            src={LOGO_DATA_URI}
             alt="MCCIA"
-            className="h-7 w-auto max-w-[7rem] object-contain"
-            onError={() => setLogoFailed(true)}
+            className="h-6 w-auto max-w-[4.5rem] object-contain"
           />
         </div>
-      )}
-      <div className="leading-tight">
-        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-          Intern OS
+      ) : (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
+          M
         </div>
-        <div className="text-[11px] text-slate-400">Applied AI Studio</div>
+      )}
+      <div className="min-w-0 leading-tight">
+        <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+          {APP_NAME}
+        </div>
+        <div className="truncate text-[11px] text-slate-400">{APP_TAGLINE}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Settings sits above the nav as an icon rather than in the list: it is a
+ * destination you visit occasionally to configure the app, not one of the
+ * places you work, and listing it alongside them gave it equal weight.
+ */
+function SettingsButton({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <NavLink
+      to="/settings"
+      onClick={onNavigate}
+      title="Settings"
+      aria-label="Settings"
+      className={({ isActive }) =>
+        cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+          isActive
+            ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200',
+        )
+      }
+    >
+      <SlidersHorizontal className="h-[18px] w-[18px]" />
+    </NavLink>
   );
 }
 
@@ -125,13 +145,19 @@ export function AppLayout() {
   const current = NAV_ITEMS.find(
     (n) => n.to === location.pathname || (n.to !== '/' && location.pathname.startsWith(n.to)),
   );
+  // Settings is no longer in NAV_ITEMS, so the header title needs it named
+  // here — otherwise /settings would fall through to "Dashboard".
+  const title = location.pathname.startsWith('/settings')
+    ? 'Settings'
+    : (current?.label ?? 'Dashboard');
 
   return (
     <div className="flex h-full">
       {/* Sidebar (desktop) */}
       <aside className="hidden w-60 shrink-0 flex-col border-r border-slate-200 bg-white py-4 dark:border-slate-800 dark:bg-slate-900 lg:flex">
-        <div className="mb-6">
+        <div className="mb-6 flex items-center justify-between gap-2 px-2">
           <Brand />
+          <SettingsButton />
         </div>
         <NavLinks />
       </aside>
@@ -144,11 +170,14 @@ export function AppLayout() {
             onClick={() => setMobileOpen(false)}
           />
           <aside className="relative flex h-full w-60 flex-col border-r border-slate-200 bg-white py-4 dark:border-slate-800 dark:bg-slate-900">
-            <div className="mb-6 flex items-center justify-between pr-3">
+            <div className="mb-6 flex items-center justify-between gap-2 px-2 pr-3">
               <Brand />
-              <button onClick={() => setMobileOpen(false)}>
-                <X className="h-5 w-5 text-slate-400" />
-              </button>
+              <div className="flex items-center gap-1">
+                <SettingsButton onNavigate={() => setMobileOpen(false)} />
+                <button onClick={() => setMobileOpen(false)} aria-label="Close menu">
+                  <X className="h-5 w-5 text-slate-400" />
+                </button>
+              </div>
             </div>
             <NavLinks onNavigate={() => setMobileOpen(false)} />
           </aside>
@@ -166,7 +195,7 @@ export function AppLayout() {
               <Menu className="h-5 w-5" />
             </button>
             <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-              {current?.label ?? 'Dashboard'}
+              {title}
             </h1>
           </div>
           <div className="flex items-center gap-1">

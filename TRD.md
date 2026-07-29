@@ -1,4 +1,4 @@
-# TRD.md — MCCIA Intern OS
+# TRD.md — MCCIA OS
 
 Technical requirements derived from PRD.md. Covers stack, non-functional requirements, and system boundaries. Data shapes live in BACKEND_SCHEMA.md; flows live in APP_FLOW.md; UI constraints live in UI_UX_BRIEF.md.
 

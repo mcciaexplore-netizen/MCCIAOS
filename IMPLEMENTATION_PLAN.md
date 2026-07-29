@@ -1,4 +1,4 @@
-# IMPLEMENTATION_PLAN.md — MCCIA Intern OS
+# IMPLEMENTATION_PLAN.md — MCCIA OS
 
 Build sequence, ordered so each phase is independently testable and nothing later depends on something not yet built. Pairs with all preceding docs (PRD, TRD, APP_FLOW, UI_UX_BRIEF, BACKEND_SCHEMA).
 

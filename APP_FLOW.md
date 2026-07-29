@@ -1,4 +1,4 @@
-# APP_FLOW.md — MCCIA Intern OS
+# APP_FLOW.md — MCCIA OS
 
 Describes user journeys end-to-end, across both the internal app and the public intake form. Pairs with PRD.md (why) and TRD.md (how it's built).
 

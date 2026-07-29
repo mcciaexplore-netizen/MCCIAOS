@@ -1,4 +1,4 @@
-# BACKEND_SCHEMA.md — MCCIA Intern OS
+# BACKEND_SCHEMA.md — MCCIA OS
 
 Defines the database schema, TypeScript types, Zod schemas, and API contracts. This is the single source of truth for data shape across the app.
 

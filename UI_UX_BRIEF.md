@@ -1,4 +1,4 @@
-# UI_UX_BRIEF.md — MCCIA Intern OS
+# UI_UX_BRIEF.md — MCCIA OS
 
 **Primary rule of this document: the existing UI does not change.** This brief exists to define how new pieces (Resources module, intake form, identity picker, unassigned filters, relabeled Kanban) slot into the current visual language without introducing anything new-looking. This is a constraints document, not a design-exploration document.
 

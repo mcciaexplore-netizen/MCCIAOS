@@ -6,7 +6,6 @@ import {
   Megaphone,
   Link2,
   BarChart3,
-  SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -16,6 +15,8 @@ export interface NavItem {
   icon: LucideIcon;
 }
 
+// Settings is deliberately absent: it is reached from the icon above the nav
+// in AppLayout, not listed as a workspace destination.
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/companies', label: 'Companies', icon: Building2 },
@@ -24,5 +25,4 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/social', label: 'Social', icon: Megaphone },
   { to: '/resources', label: 'Resources', icon: Link2 },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
 ];

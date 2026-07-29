@@ -1,4 +1,4 @@
-# MCCIA Intern OS
+# MCCIA OS
 
 Internal workspace for the MCCIA Applied AI Studio team to manage MSME clients,
 consulting sessions, app-dev projects, social content, and shared resources. The

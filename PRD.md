@@ -1,8 +1,8 @@
-# PRD.md — MCCIA Intern OS
+# PRD.md — MCCIA OS
 
 ## 1. Product Summary
 
-MCCIA Intern OS is an internal, open-access workspace used by the Applied AI Studio team (interns + staff) at MCCIA, Pune, to manage MSME clients, consulting sessions, custom app-development projects, social content, and shared resource links — with a public front door for MSME owners to submit consultation or app-development requests directly.
+MCCIA OS is an internal, open-access workspace used by the Applied AI Studio team (interns + staff) at MCCIA, Pune, to manage MSME clients, consulting sessions, custom app-development projects, social content, and shared resource links — with a public front door for MSME owners to submit consultation or app-development requests directly.
 
 This document covers **what** the product does and **why**. It does not cover technical implementation (see TRD.md), data structures (see BACKEND_SCHEMA.md), or UI details (see UI_UX_BRIEF.md).
 
