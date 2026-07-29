@@ -7,6 +7,8 @@ export type SheetName =
   | 'Project'
   | 'Creative'
   | 'Resource'
+  | 'Message'
+  | 'Template'
   | 'Settings';
 
 // These vocabularies are configurable on the Settings page, so they are open
@@ -112,6 +114,56 @@ export interface Creative {
   assignedTo?: string | null;
   createdBy: string;
   createdAt: string;
+}
+
+// Outbound messages: the daily WhatsApp/email sends and the workshop notices.
+//
+// Nothing here sends anything yet — the app records what went out and lets you
+// compose and preview it. The delivery fields (scheduledFor, sentAt, provider,
+// providerMessageId, failureReason) exist so a real sender can be dropped in
+// later and fill them without reshaping stored records.
+export type MessageChannel = 'whatsapp' | 'email';
+export type MessageKind = 'daily' | 'workshop';
+export type MessageStatus = 'draft' | 'scheduled' | 'sent' | 'failed';
+
+export interface Message {
+  id: string;
+  channel: MessageChannel;
+  kind: MessageKind;
+  title: string;
+  /** Plain text for WhatsApp; for email this is the fallback when no template. */
+  body?: string;
+  /** Template record id, email only. */
+  templateId?: string | null;
+  subject?: string;
+  audience?: string;
+  recipientCount?: number;
+  scheduledFor?: string;
+  sentAt?: string;
+  status: MessageStatus;
+  notes?: string;
+  /** Reserved for the future sender — which provider handled it, and its id. */
+  provider?: string;
+  providerMessageId?: string;
+  failureReason?: string;
+  assignedTo?: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** A reusable HTML email template, edited and previewed in the app. */
+export interface Template {
+  id: string;
+  name: string;
+  subject?: string;
+  description?: string;
+  category?: string;
+  /** Raw HTML. Rendered only inside a sandboxed iframe. */
+  html: string;
+  assignedTo?: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Resource {

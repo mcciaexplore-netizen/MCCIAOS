@@ -479,6 +479,138 @@ from items order by created_at desc limit $4 offset $5`;
   };
 }
 
+export interface CapacityRow {
+  member: string;
+  /** Work created in the window — what they took on. */
+  consultations: number;
+  setups: number;
+  messages: number;
+  /** Open regardless of window — what is still on their plate right now. */
+  openConsultations: number;
+  openSetups: number;
+  overdueFollowups: number;
+  dueSoonFollowups: number;
+  /** Open items weighted by type; the single number the bar is drawn from. */
+  load: number;
+}
+
+// Relative weights for the load score. A half-built project occupies far more
+// of someone's week than an open consultation, which in turn outweighs a
+// follow-up ping — a flat count would rank a person with ten reminders above
+// one carrying three live builds.
+const LOAD_WEIGHTS = { setup: 3, consultation: 1, followup: 0.5 };
+
+/**
+ * Team bandwidth: who is carrying what right now.
+ *
+ * Deliberately mixes two horizons. Throughput columns are scoped to the
+ * selected period, because "what did they do this month" is a period question.
+ * The open/overdue columns ignore the period entirely — an unfinished project
+ * from March is still on that person's plate today, and hiding it because it
+ * started outside the window would defeat the point of a capacity view.
+ */
+export async function getCapacity(input: PeriodInput): Promise<CapacityRow[]> {
+  const db = requireSql();
+
+  const text = `
+with ${BOUNDS_CTE},
+-- The roster lives as a jsonb array on the Settings record, not a table, so
+-- it is unnested here. Falling back to whoever appears in assigned_to keeps
+-- the view honest if Settings has not been saved yet.
+-- The LIMIT has to be applied to the Settings row *before* unnesting: a
+-- set-returning function in the select list expands rows first, so
+-- "... from records where sheet='Settings' limit 1" would return one team
+-- member rather than one settings record.
+roster as (
+  select jsonb_array_elements_text(s.data -> 'teamMembers') as member
+  from (
+    select data from records where sheet = 'Settings' order by created_at limit 1
+  ) s
+),
+members as (
+  select member from roster
+  union
+  select distinct assigned_to from records
+  where assigned_to is not null and assigned_to <> ''
+    and sheet in ('Session', 'Project', 'Message', 'Followup')
+),
+in_period as (
+  select r.assigned_to as member,
+    count(*) filter (where r.sheet = 'Session') as consultations,
+    count(*) filter (where r.sheet = 'Project') as setups,
+    count(*) filter (where r.sheet = 'Message') as messages
+  from records r cross join bounds b
+  where r.created_at >= b.cur_start and r.created_at < b.cur_end
+    and r.sheet in ('Session', 'Project', 'Message')
+  group by 1
+),
+open_now as (
+  select assigned_to as member,
+    count(*) filter (
+      where sheet = 'Session'
+        and coalesce(data ->> 'status', '') not in ('Completed')
+    ) as open_consultations,
+    count(*) filter (
+      where sheet = 'Project'
+        and coalesce(data ->> 'stage', '') <> all($4::text[])
+    ) as open_setups
+  from records
+  where sheet in ('Session', 'Project')
+  group by 1
+),
+followups as (
+  select assigned_to as member,
+    count(*) filter (
+      where (data ->> 'dueDate')::date < (now() at time zone '${IST}')::date
+    ) as overdue,
+    count(*) filter (
+      where (data ->> 'dueDate')::date between (now() at time zone '${IST}')::date
+        and (now() at time zone '${IST}')::date + 3
+    ) as due_soon
+  from records
+  where sheet = 'Followup'
+    and coalesce((data ->> 'done')::boolean, false) = false
+    and (data ->> 'dueDate') ~ '^\\d{4}-\\d{2}-\\d{2}'
+  group by 1
+)
+select
+  m.member,
+  coalesce(p.consultations, 0)::int      as consultations,
+  coalesce(p.setups, 0)::int             as setups,
+  coalesce(p.messages, 0)::int           as messages,
+  coalesce(o.open_consultations, 0)::int as "openConsultations",
+  coalesce(o.open_setups, 0)::int        as "openSetups",
+  coalesce(f.overdue, 0)::int            as "overdueFollowups",
+  coalesce(f.due_soon, 0)::int           as "dueSoonFollowups",
+  (coalesce(o.open_setups, 0) * ${LOAD_WEIGHTS.setup}
+   + coalesce(o.open_consultations, 0) * ${LOAD_WEIGHTS.consultation}
+   + coalesce(f.overdue, 0) * ${LOAD_WEIGHTS.followup}
+   + coalesce(f.due_soon, 0) * ${LOAD_WEIGHTS.followup})::float8 as load
+from members m
+left join in_period p on p.member = m.member
+left join open_now  o on o.member = m.member
+left join followups f on f.member = m.member
+where m.member is not null and m.member <> ''
+order by load desc, m.member`;
+
+  const rows = (await db.query(text, [
+    ...periodParams(input),
+    DELIVERED_STAGES,
+  ])) as CapacityRow[];
+
+  return rows.map((r) => ({
+    member: r.member,
+    consultations: Number(r.consultations),
+    setups: Number(r.setups),
+    messages: Number(r.messages),
+    openConsultations: Number(r.openConsultations),
+    openSetups: Number(r.openSetups),
+    overdueFollowups: Number(r.overdueFollowups),
+    dueSoonFollowups: Number(r.dueSoonFollowups),
+    load: Number(r.load),
+  }));
+}
+
 /** Every line item in the period — the CSV export and the PDF appendix. */
 export async function getLineItems(input: PeriodInput): Promise<ActivityRow[]> {
   const { rows } = await getActivity(input, 100000, 0);

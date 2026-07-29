@@ -10,6 +10,7 @@ import {
   PERIODS,
   getActivity,
   getBreakdown,
+  getCapacity,
   getSummary,
   getTimeseries,
 } from './analytics.js';
@@ -265,6 +266,9 @@ async function handleAnalytics(
 
       // Not in the original endpoint list, but the activity table on the page
       // needs its own paging and cannot ride along with the summary.
+      case '/api/analytics/capacity':
+        return json(200, { rows: await getCapacity(periodInput) });
+
       case '/api/analytics/activity': {
         const limit = Math.min(Number(query.get('limit') ?? 20) || 20, 200);
         const offset = Math.max(Number(query.get('offset') ?? 0) || 0, 0);

@@ -19,6 +19,7 @@ import { RankedBars, Sparkline, TimeBars, type Series } from '@/components/chart
 import {
   analytics,
   type ActivityRow,
+  type CapacityRow,
   type Dimension,
   type Granularity,
   type MetricName,
@@ -296,6 +297,17 @@ export default function Analytics() {
         <BreakdownCard title="Application type" metric="setups" dimension="type" q={query} series="setups" />
       </div>
 
+      {/* 4b. Team bandwidth */}
+      <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
+        Team bandwidth
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Throughput is for the selected period; open and overdue counts are current,
+        regardless of period — unfinished work does not stop mattering because it
+        started earlier.
+      </p>
+      <CapacitySection q={query} />
+
       {/* 5. Recent activity */}
       <h3 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
         Recent activity
@@ -383,6 +395,129 @@ export default function Analytics() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Who is carrying what. The bar is the weighted load score, so the row order
+ * and the bar agree; the raw counts sit alongside so the number is never only
+ * readable as a length.
+ */
+function CapacitySection({ q }: { q: PeriodQuery }) {
+  const query = useQuery({
+    queryKey: ['an-cap', q.period, q.from ?? '', q.to ?? ''],
+    queryFn: () => analytics.capacity(q),
+  });
+
+  if (query.isLoading) {
+    return (
+      <Card className="mb-6 p-4">
+        <div className="space-y-3">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          ))}
+        </div>
+      </Card>
+    );
+  }
+  if (query.error) {
+    return (
+      <div className="mb-6">
+        <ErrorState error={query.error as Error} onRetry={() => query.refetch()} />
+      </div>
+    );
+  }
+
+  const rows = query.data?.rows ?? [];
+  if (rows.length === 0) {
+    return (
+      <Card className="mb-6 p-6">
+        <p className="text-center text-sm text-slate-400">
+          No team members configured yet. Add them in Settings → Team.
+        </p>
+      </Card>
+    );
+  }
+
+  const maxLoad = Math.max(1, ...rows.map((r) => r.load));
+
+  return (
+    <Card className="mb-6 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-800/60">
+            <tr>
+              <th className="px-4 py-2 font-medium">Member</th>
+              <th className="px-4 py-2 font-medium">Current load</th>
+              <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Open</th>
+              <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Overdue</th>
+              <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Due soon</th>
+              <th className="whitespace-nowrap px-4 py-2 text-right font-medium">In period</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {rows.map((r: CapacityRow) => (
+              <tr key={r.member}>
+                <td className="whitespace-nowrap px-4 py-2 font-medium text-slate-700 dark:text-slate-200">
+                  {r.member}
+                </td>
+                <td className="px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="h-1.5 w-full min-w-[3rem] max-w-[10rem] rounded-full bg-slate-100 dark:bg-slate-800">
+                      <span
+                        className={
+                          'block h-full rounded-full ' +
+                          (r.overdueFollowups > 0
+                            ? 'bg-rose-500'
+                            : r.load >= maxLoad * 0.75
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-500')
+                        }
+                        style={{ width: `${Math.max((r.load / maxLoad) * 100, r.load > 0 ? 4 : 0)}%` }}
+                      />
+                    </span>
+                    <span className="tabular-nums text-xs text-slate-400">
+                      {r.load.toFixed(1)}
+                    </span>
+                  </div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums text-slate-500">
+                  {r.openSetups > 0 && (
+                    <span title="Open setups">{r.openSetups}s</span>
+                  )}
+                  {r.openSetups > 0 && r.openConsultations > 0 && ' · '}
+                  {r.openConsultations > 0 && (
+                    <span title="Open consultations">{r.openConsultations}c</span>
+                  )}
+                  {r.openSetups === 0 && r.openConsultations === 0 && '—'}
+                </td>
+                <td
+                  className={
+                    'px-4 py-2 text-right tabular-nums ' +
+                    (r.overdueFollowups > 0
+                      ? 'font-medium text-rose-600 dark:text-rose-400'
+                      : 'text-slate-400')
+                  }
+                >
+                  {r.overdueFollowups || '—'}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-slate-500">
+                  {r.dueSoonFollowups || '—'}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums text-slate-500">
+                  {r.consultations + r.setups + r.messages || '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400 dark:border-slate-800">
+        Load weights open work by type — a setup counts 3, a consultation 1, a
+        follow-up 0.5 — so three live builds outrank ten reminders. Red marks
+        anyone with an overdue follow-up.
+      </p>
+    </Card>
   );
 }
 

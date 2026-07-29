@@ -39,6 +39,18 @@ export interface Summary {
   };
 }
 
+export interface CapacityRow {
+  member: string;
+  consultations: number;
+  setups: number;
+  messages: number;
+  openConsultations: number;
+  openSetups: number;
+  overdueFollowups: number;
+  dueSoonFollowups: number;
+  load: number;
+}
+
 export interface ActivityRow {
   id: string;
   kind: 'consultation' | 'setup';
@@ -96,6 +108,9 @@ export const analytics = {
       '/api/analytics/breakdown',
       periodQs(p, { metric, dimension }),
     ),
+
+  capacity: (p: PeriodQuery) =>
+    get<{ rows: CapacityRow[] }>('/api/analytics/capacity', periodQs(p)),
 
   activity: (p: PeriodQuery, limit: number, offset: number) =>
     get<{ rows: ActivityRow[]; total: number }>(

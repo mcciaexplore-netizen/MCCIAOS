@@ -5,6 +5,8 @@ import {
   KanbanSquare,
   Megaphone,
   Link2,
+  Send,
+  Code2,
   BarChart3,
   type LucideIcon,
 } from 'lucide-react';
@@ -24,5 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/app-development', label: 'App Development', icon: KanbanSquare },
   { to: '/social', label: 'Social', icon: Megaphone },
   { to: '/resources', label: 'Resources', icon: Link2 },
+  { to: '/messages', label: 'Messages', icon: Send },
+  { to: '/templates', label: 'Templates', icon: Code2 },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];

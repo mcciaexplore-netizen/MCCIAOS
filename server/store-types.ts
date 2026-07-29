@@ -8,6 +8,8 @@ export type SheetName =
   | 'Project'
   | 'Creative'
   | 'Resource'
+  | 'Message'
+  | 'Template'
   | 'Settings';
 
 export const SHEET_ALLOWLIST: SheetName[] = [
@@ -17,6 +19,8 @@ export const SHEET_ALLOWLIST: SheetName[] = [
   'Project',
   'Creative',
   'Resource',
+  'Message',
+  'Template',
   'Settings',
 ];
 

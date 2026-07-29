@@ -8,6 +8,8 @@ const Consulting = lazy(() => import('@/pages/Consulting'));
 const AppDevelopment = lazy(() => import('@/pages/AppDevelopment'));
 const Social = lazy(() => import('@/pages/Social'));
 const Resources = lazy(() => import('@/pages/Resources'));
+const Messages = lazy(() => import('@/pages/Messages'));
+const Templates = lazy(() => import('@/pages/Templates'));
 const Analytics = lazy(() => import('@/pages/Analytics'));
 const Settings = lazy(() => import('@/pages/Settings'));
 
@@ -36,6 +38,8 @@ export default function App() {
           <Route path="/app-development" element={page(AppDevelopment)} />
           <Route path="/social" element={page(Social)} />
           <Route path="/resources" element={page(Resources)} />
+          <Route path="/messages" element={page(Messages)} />
+          <Route path="/templates" element={page(Templates)} />
           <Route path="/analytics" element={page(Analytics)} />
           <Route path="/settings" element={page(Settings)} />
           <Route path="*" element={<Navigate to="/" replace />} />
