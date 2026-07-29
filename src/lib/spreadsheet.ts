@@ -10,7 +10,7 @@
 // heaviest thing this app depends on, and a user who never touches Import or
 // Export should never pay for them, so they stay out of the initial bundle.
 
-import { parseDelimited, rowsToObjects, toCsv, download } from './csv';
+import { parseDelimited, rowsToObjects, toCsv } from './csv';
 
 export type SpreadsheetFormat = 'csv' | 'xlsx';
 
@@ -119,6 +119,20 @@ export async function writeSpreadsheet({
   }).toBlob();
 
   downloadBlob(`${filename}.xlsx`, blob);
+}
+
+/**
+ * Trigger a browser download of text content. Lives here rather than in ./csv
+ * because that module is also compiled for the server, where `document` does
+ * not exist.
+ */
+export function download(filename: string, content: string, type = 'text/csv') {
+  // Excel on Windows assumes the system codepage for a plain CSV, which
+  // mangles any non-ASCII company name. A BOM makes it read UTF-8.
+  downloadBlob(
+    filename,
+    new Blob([type.startsWith('text/csv') ? '﻿' : '', content], { type }),
+  );
 }
 
 function downloadBlob(filename: string, blob: Blob) {

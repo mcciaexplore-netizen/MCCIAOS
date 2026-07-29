@@ -8,6 +8,7 @@ const Consulting = lazy(() => import('@/pages/Consulting'));
 const AppDevelopment = lazy(() => import('@/pages/AppDevelopment'));
 const Social = lazy(() => import('@/pages/Social'));
 const Resources = lazy(() => import('@/pages/Resources'));
+const Analytics = lazy(() => import('@/pages/Analytics'));
 const Settings = lazy(() => import('@/pages/Settings'));
 
 function PageFallback() {
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/app-development" element={page(AppDevelopment)} />
           <Route path="/social" element={page(Social)} />
           <Route path="/resources" element={page(Resources)} />
+          <Route path="/analytics" element={page(Analytics)} />
           <Route path="/settings" element={page(Settings)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

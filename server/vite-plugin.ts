@@ -56,7 +56,7 @@ export function apiMiddleware(): Plugin {
               'unknown',
           });
 
-          sendJson(res, result.status, result.body);
+          sendJson(res, result.status, result.body, result.headers, result.binary);
         } catch (err) {
           // Same reasoning as api/[...path].ts: surface the message so a
           // misconfiguration is readable in the UI, not just the terminal.
@@ -71,8 +71,20 @@ export function apiMiddleware(): Plugin {
   };
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown) {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  headers?: Record<string, string>,
+  binary?: boolean,
+) {
   res.statusCode = status;
+  for (const [k, v] of Object.entries(headers ?? {})) res.setHeader(k, v);
+  if (binary) {
+    // Mirrors api/[...path].ts so downloads behave the same in dev.
+    res.end(Buffer.from(body as Uint8Array));
+    return;
+  }
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(body));
 }

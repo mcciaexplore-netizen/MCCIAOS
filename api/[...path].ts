@@ -27,7 +27,7 @@ export default async function handler(req: VercelReq, res: ServerResponse) {
       ip: (headers['x-forwarded-for']?.split(',')[0] ?? 'unknown').trim(),
     });
 
-    send(res, result.status, result.body);
+    send(res, result.status, result.body, result.headers, result.binary);
   } catch (err) {
     // Mirrors the dev middleware: an unhandled failure (most likely the
     // database being unreachable) must still come back as JSON, because the
@@ -44,8 +44,20 @@ export default async function handler(req: VercelReq, res: ServerResponse) {
   }
 }
 
-function send(res: ServerResponse, status: number, body: unknown) {
+function send(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  headers?: Record<string, string>,
+  binary?: boolean,
+) {
   res.statusCode = status;
+  for (const [k, v] of Object.entries(headers ?? {})) res.setHeader(k, v);
+  if (binary) {
+    // Already-encoded bytes (xlsx, pdf). Content-Type came from the caller.
+    res.end(Buffer.from(body as Uint8Array));
+    return;
+  }
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(body));
 }

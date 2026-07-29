@@ -89,16 +89,7 @@ export function parseDelimited(
 
 export const parseCsv = (text: string) => parseDelimited(text, ',');
 
-export function download(filename: string, content: string, type = 'text/csv') {
-  // Excel on Windows assumes the system codepage for a plain CSV, which
-  // mangles any non-ASCII company name. A BOM makes it read UTF-8.
-  const blob = new Blob([type.startsWith('text/csv') ? '﻿' : '', content], {
-    type,
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+// NOTE: the browser download helper used to live here, but this module is now
+// also compiled for the server (server/reports.ts reuses toCsv), where there is
+// no `document`. Everything above is pure string work; the DOM half moved to
+// ./spreadsheet, which is browser-only by design.

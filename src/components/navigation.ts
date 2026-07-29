@@ -5,6 +5,7 @@ import {
   KanbanSquare,
   Megaphone,
   Link2,
+  BarChart3,
   SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react';
@@ -22,5 +23,6 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/app-development', label: 'App Development', icon: KanbanSquare },
   { to: '/social', label: 'Social', icon: Megaphone },
   { to: '/resources', label: 'Resources', icon: Link2 },
+  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
 ];
