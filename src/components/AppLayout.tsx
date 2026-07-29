@@ -5,29 +5,18 @@ import { NAV_ITEMS } from './navigation';
 import { useTheme } from '@/lib/theme';
 import { useFollowups } from '@/hooks';
 import { cn, daysUntil } from '@/lib/utils';
-import { APP_NAME, APP_TAGLINE, LOGO_DATA_URI, hasLogo } from '@/lib/brand';
+import { APP_NAME, APP_TAGLINE, LOGO_SRC } from '@/lib/brand';
 
 function Brand() {
-  // Install the real wordmark with `npm run logo -- path/to/logo.png`; until
-  // then this renders a lettermark rather than a broken image.
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      {hasLogo() ? (
-        // The wordmark's blue sits low-contrast on the dark sidebar, so in dark
-        // mode it gets a white plate rather than being recoloured — the brand
-        // colours stay correct in both themes.
-        <div className="shrink-0 rounded dark:bg-white dark:px-1 dark:py-0.5">
-          <img
-            src={LOGO_DATA_URI}
-            alt="MCCIA"
-            className="h-6 w-auto max-w-[4.5rem] object-contain"
-          />
-        </div>
-      ) : (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-          M
-        </div>
-      )}
+      <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-white p-1 ring-1 ring-slate-200 dark:ring-slate-700">
+        <img
+          src={LOGO_SRC}
+          alt="MCCIA"
+          className="max-h-full max-w-full object-contain"
+        />
+      </div>
       <div className="min-w-0 leading-tight">
         <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
           {APP_NAME}

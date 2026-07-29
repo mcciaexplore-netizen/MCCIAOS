@@ -18,6 +18,7 @@
 
 export const APP_NAME = 'MCCIA OS';
 export const APP_TAGLINE = 'Applied AI Studio';
+export const LOGO_SRC = '/mccia-logo.png';
 
 /**
  * Populated by scripts/set-logo.mjs. Empty means "no logo installed yet".
