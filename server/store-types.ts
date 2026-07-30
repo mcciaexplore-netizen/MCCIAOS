@@ -47,6 +47,8 @@ export interface RecordStore {
   insert(input: InsertInput): Promise<StoredRecord>;
   patch(id: string, data: Record<string, unknown>): Promise<StoredRecord | undefined>;
   remove(id: string): Promise<boolean>;
+  /** Deletes every record in the sheet, returning how many were removed. */
+  removeBySheet(sheet: SheetName): Promise<number>;
 }
 
 export function isValidSheet(sheet: string): sheet is SheetName {

@@ -91,4 +91,12 @@ export const fileStore: RecordStore = {
     persist();
     return true;
   },
+
+  async removeBySheet(sheet: SheetName) {
+    const list = load();
+    const before = list.length;
+    cache = list.filter((r) => r.sheet !== sheet);
+    persist();
+    return before - cache.length;
+  },
 };

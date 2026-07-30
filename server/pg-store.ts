@@ -108,5 +108,12 @@ export function createPgStore(connectionString: string): RecordStore {
       `) as Row[];
       return rows.length > 0;
     },
+
+    async removeBySheet(sheet: SheetName) {
+      const rows = (await sql`
+        delete from records where sheet = ${sheet} returning id
+      `) as { id: string }[];
+      return rows.length;
+    },
   };
 }

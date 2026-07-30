@@ -62,6 +62,7 @@ function unconfiguredStore(): RecordStore {
     insert: fail,
     patch: fail,
     remove: fail,
+    removeBySheet: fail,
   };
 }
 
@@ -101,3 +102,4 @@ export const insert = (input: InsertInput) => backend.insert(input);
 export const patch = (id: string, data: Record<string, unknown>) =>
   backend.patch(id, data);
 export const remove = (id: string) => backend.remove(id);
+export const removeBySheet = (sheet: SheetName) => backend.removeBySheet(sheet);

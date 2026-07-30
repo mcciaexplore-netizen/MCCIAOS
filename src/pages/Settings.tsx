@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
   Trash2,
@@ -13,15 +14,17 @@ import {
   KanbanSquare,
   Megaphone,
   Link2,
+  AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
-import { Badge, Button, Card, Input, Select } from '@/components/ui';
+import { Badge, Button, Card, Input, Modal, Select } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import type { AppSettings, TonedOption } from '@/types';
+import type { AppSettings, SheetName, TonedOption } from '@/types';
 
 // Pull just the persisted keys out of the context value, dropping the derived
 // lookups so they never leak into storage.
@@ -62,12 +65,21 @@ interface Editor {
   placeholder?: string;
 }
 
+/** Bulk wipe offered in a group's danger zone. Sheets are deleted together
+ *  so dependent records (e.g. follow-ups under sessions) never orphan. */
+interface DangerAction {
+  title: string;
+  description: string;
+  sheets: { sheet: SheetName; label: string }[];
+}
+
 interface Group {
   id: string;
   label: string;
   icon: LucideIcon;
   blurb: string;
   editors: Editor[];
+  danger?: DangerAction;
 }
 
 const GROUPS: Group[] = [
@@ -97,6 +109,12 @@ const GROUPS: Group[] = [
       { key: 'businessScales', title: 'Business scales', description: 'MSME size bands.', kind: 'plain', placeholder: 'Scale' },
       { key: 'membershipStatuses', title: 'Membership statuses', description: 'MCCIA membership state of a company.', kind: 'plain', placeholder: 'Status' },
     ],
+    danger: {
+      title: 'Delete all companies',
+      description:
+        'Permanently removes every company record. Sessions and projects are kept but lose their link to the deleted companies.',
+      sheets: [{ sheet: 'Company', label: 'companies' }],
+    },
   },
   {
     id: 'consulting',
@@ -106,6 +124,15 @@ const GROUPS: Group[] = [
     editors: [
       { key: 'sessionStatuses', title: 'Session statuses', description: 'Status values available on a consulting session.', kind: 'toned' },
     ],
+    danger: {
+      title: 'Delete all consulting data',
+      description:
+        'Permanently removes every consulting session and every follow-up. Companies are not touched.',
+      sheets: [
+        { sheet: 'Session', label: 'sessions' },
+        { sheet: 'Followup', label: 'follow-ups' },
+      ],
+    },
   },
   {
     id: 'projects',
@@ -115,6 +142,12 @@ const GROUPS: Group[] = [
     editors: [
       { key: 'projectStages', title: 'Kanban stages', description: 'Board columns, in order. New companies enter at the first column.', kind: 'toned' },
     ],
+    danger: {
+      title: 'Delete all projects',
+      description:
+        'Permanently removes every app-development project from the Kanban board. Companies are not touched.',
+      sheets: [{ sheet: 'Project', label: 'projects' }],
+    },
   },
   {
     id: 'social',
@@ -279,6 +312,10 @@ export default function Settings() {
             Renaming an entry does not rewrite records that already use the old
             value — those keep their stored label until you edit them.
           </p>
+          {tab.danger && (
+            // Keyed by tab so switching sections resets the confirm state.
+            <DangerZone key={tab.id} action={tab.danger} />
+          )}
         </div>
       </div>
 
@@ -305,6 +342,121 @@ export default function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+function DangerZone({ action }: { action: DangerAction }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [busy, setBusy] = useState(false);
+  // Live counts fetched when the modal opens, so the warning names the real
+  // blast radius instead of a vague "everything".
+  const [counts, setCounts] = useState<number[] | null>(null);
+
+  function openModal() {
+    setConfirmText('');
+    setCounts(null);
+    setOpen(true);
+    Promise.all(
+      action.sheets.map((s) =>
+        api.list(s.sheet).then((r) => r.records.length),
+      ),
+    )
+      .then(setCounts)
+      .catch(() => setCounts(null));
+  }
+
+  async function handleDelete() {
+    setBusy(true);
+    try {
+      const results = [];
+      for (const s of action.sheets) {
+        results.push(await api.removeAll(s.sheet));
+        qc.invalidateQueries({ queryKey: ['records', s.sheet] });
+      }
+      const total = results.reduce((n, r) => n + r.deleted, 0);
+      toast(`Deleted ${total} record${total === 1 ? '' : 's'}`);
+      setOpen(false);
+    } catch (err) {
+      toast((err as Error).message || 'Delete failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const summary = action.sheets
+    .map((s, i) => (counts ? `${counts[i]} ${s.label}` : s.label))
+    .join(' and ');
+
+  return (
+    <Card className="mt-4 border-rose-200 dark:border-rose-900">
+      <div className="p-4">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-rose-500" />
+          <h2 className="font-semibold text-rose-700 dark:text-rose-400">
+            Danger zone
+          </h2>
+        </div>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+              {action.title}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">{action.description}</p>
+          </div>
+          <Button variant="danger" size="sm" className="shrink-0" onClick={openModal}>
+            <Trash2 className="h-4 w-4" /> Delete all
+          </Button>
+        </div>
+      </div>
+
+      <Modal
+        open={open}
+        onClose={() => !busy && setOpen(false)}
+        title={action.title}
+        description="This cannot be undone."
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setOpen(false)}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleDelete}
+              disabled={busy || confirmText !== 'DELETE'}
+            >
+              <Trash2 className="h-4 w-4" />
+              {busy ? 'Deleting...' : 'Delete all'}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          You are about to permanently delete{' '}
+          <span className="font-semibold">{summary}</span>. {action.description}
+        </p>
+        <div className="mt-4">
+          <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+            Type <span className="font-mono font-semibold">DELETE</span> to confirm
+          </label>
+          <Input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="DELETE"
+            autoFocus
+          />
+        </div>
+      </Modal>
+    </Card>
   );
 }
 

@@ -47,6 +47,11 @@ export const api = {
   remove(id: string): Promise<{ success: boolean }> {
     return request(`/api/records/${id}`, { method: 'DELETE' });
   },
+  removeAll(sheet: SheetName): Promise<{ deleted: number }> {
+    return request(`/api/records?sheet=${encodeURIComponent(sheet)}`, {
+      method: 'DELETE',
+    });
+  },
   bulk(sheet: SheetName, records: unknown[]): Promise<{ created: number; errors: unknown[] }> {
     return request('/api/bulk', {
       method: 'POST',

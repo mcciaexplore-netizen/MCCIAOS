@@ -23,6 +23,7 @@ import {
   listBySheet,
   patch,
   remove,
+  removeBySheet,
   type SheetName,
 } from './store.js';
 
@@ -130,6 +131,17 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
         assignedTo,
       });
       return json(201, { record: toEntity(row) });
+    }
+    if (method === 'DELETE') {
+      // Bulk wipe of one sheet, behind the Settings "Danger zone". The
+      // Settings sheet itself stays out of reach — wiping it would destroy
+      // every configured vocabulary rather than any module's records.
+      const sheet = req.query.get('sheet') ?? '';
+      if (!isValidSheet(sheet)) return json(400, { error: 'Unknown sheet' });
+      if (sheet === 'Settings')
+        return json(400, { error: 'The Settings sheet cannot be bulk-deleted' });
+      const deleted = await removeBySheet(sheet);
+      return json(200, { deleted });
     }
     return json(405, { error: 'Method not allowed' });
   }
