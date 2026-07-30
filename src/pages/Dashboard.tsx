@@ -80,7 +80,7 @@ export default function Dashboard() {
       items.push({
         id: 's' + s.id,
         label: `Session · ${companyName[s.companyId] ?? 'company'}`,
-        sub: s.query.slice(0, 60),
+        sub: (s.query ?? '').slice(0, 60),
         at: s.createdAt,
       });
     for (const p of projects.items)
