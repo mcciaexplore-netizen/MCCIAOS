@@ -175,3 +175,83 @@ export interface Resource {
   addedBy: string;
   createdAt: string;
 }
+
+// ---- Workshops & Events ---------------------------------------------------
+// The only module backed by its own tables (db/events.sql) rather than the
+// generic `records` store, so these fields map to real columns. Unlike the
+// vocabularies above these three are fixed CHECK constraints in Postgres, not
+// Settings-configurable, so they are literal unions.
+export type EventType = 'WORKSHOP' | 'EVENT';
+export type EventMode = 'ONLINE' | 'OFFLINE' | 'HYBRID';
+export type EventStatus = 'UPCOMING' | 'COMPLETED' | 'CANCELLED';
+
+/**
+ * Named EventRecord rather than Event: `Event` is a DOM global, and shadowing
+ * it makes every unrelated `addEventListener` signature in the file wrong.
+ */
+export interface EventRecord {
+  id: string;
+  /** "W-01", "EV-07". Unique; derived from type + serialNo. */
+  code: string;
+  type: EventType;
+  serialNo: number;
+  title: string;
+  description: string | null;
+  topic: string | null;
+  mode: EventMode;
+  /** Kept only for OFFLINE/HYBRID; cleared by the server otherwise. */
+  venue: string | null;
+  /** Kept only for ONLINE/HYBRID; cleared by the server otherwise. */
+  meetingLink: string | null;
+  /** YYYY-MM-DD. */
+  eventDate: string;
+  /** HH:MM, 24-hour. */
+  startTime: string | null;
+  endTime: string | null;
+  speaker: string | null;
+  status: EventStatus;
+  /**
+   * The stored manual-override columns. These are the bulk figures used for
+   * back-filled events; prefer the derived `registered`/`attended` below for
+   * anything shown on screen.
+   */
+  registeredCount: number;
+  attendedCount: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+
+  // ---- Derived, computed per request; never stored -------------------------
+  /** True when this event has participant rows, i.e. counts are not fallbacks. */
+  hasParticipants: boolean;
+  /** Participant rows when any exist, else registeredCount. */
+  registered: number;
+  /** Attended participant rows when any exist, else attendedCount. */
+  attended: number;
+  /** attended/registered as a 0-100 percentage; null when registered is 0. */
+  attendanceRate: number | null;
+}
+
+export interface EventParticipant {
+  id: string;
+  eventId: string;
+  name: string;
+  company: string | null;
+  designation: string | null;
+  email: string | null;
+  phone: string | null;
+  /** Whether the attendee is an MCCIA member. */
+  isMember: boolean;
+  registeredAt: string;
+  attended: boolean;
+  createdAt: string;
+}
+
+/** Totals for the list page's stat cards, computed over the filtered set. */
+export interface EventSummary {
+  workshops: number;
+  events: number;
+  registered: number;
+  attended: number;
+  attendanceRate: number | null;
+}

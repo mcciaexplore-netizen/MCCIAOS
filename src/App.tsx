@@ -7,6 +7,9 @@ const Companies = lazy(() => import('@/pages/Companies'));
 const Consulting = lazy(() => import('@/pages/Consulting'));
 const AppDevelopment = lazy(() => import('@/pages/AppDevelopment'));
 const Social = lazy(() => import('@/pages/Social'));
+const Events = lazy(() => import('@/pages/Events'));
+const EventForm = lazy(() => import('@/pages/EventForm'));
+const EventDetail = lazy(() => import('@/pages/EventDetail'));
 const Resources = lazy(() => import('@/pages/Resources'));
 const Messages = lazy(() => import('@/pages/Messages'));
 const Templates = lazy(() => import('@/pages/Templates'));
@@ -36,6 +39,12 @@ export default function App() {
           <Route path="/companies" element={page(Companies)} />
           <Route path="/consulting" element={page(Consulting)} />
           <Route path="/app-development" element={page(AppDevelopment)} />
+          {/* Static segments before the dynamic one, so /events/new is never
+              read as an event id. */}
+          <Route path="/events" element={page(Events)} />
+          <Route path="/events/new" element={page(EventForm)} />
+          <Route path="/events/:id" element={page(EventDetail)} />
+          <Route path="/events/:id/edit" element={page(EventForm)} />
           <Route path="/social" element={page(Social)} />
           <Route path="/resources" element={page(Resources)} />
           <Route path="/messages" element={page(Messages)} />

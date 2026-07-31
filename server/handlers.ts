@@ -4,6 +4,15 @@
 
 import { importSchemaForSheet, schemaForSheet } from '../src/schemas/index.js';
 import {
+  EVENT_TYPES,
+  eventSchema,
+  eventUpdateSchema,
+  participantImportSchema,
+  participantSchema,
+  participantUpdateSchema,
+} from '../src/schemas/events.js';
+import { parseCsv, toCsv } from '../src/lib/csv.js';
+import {
   DIMENSIONS,
   GRANULARITIES,
   METRICS,
@@ -14,6 +23,22 @@ import {
   getSummary,
   getTimeseries,
 } from './analytics.js';
+import {
+  EventError,
+  addParticipant,
+  createEvent,
+  deleteEvent,
+  deleteParticipant,
+  getEvent,
+  importParticipants,
+  listEvents,
+  listParticipants,
+  nextCode,
+  setAllAttendance,
+  updateEvent,
+  updateParticipant,
+  type ParticipantWriteInput,
+} from './events.js';
 import { buildReport } from './reports.js';
 import { NO_SQL_MESSAGE, hasSql } from './sql.js';
 import {
@@ -210,6 +235,13 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     return handleAnalytics(pathname, req.query);
   }
 
+  // ---- /api/events, /api/participants ------------------------------------
+  // Same access position as everything above: unauthenticated, because the app
+  // has no identity to scope by (see the note on /api/analytics).
+  if (pathname.startsWith('/api/events') || pathname.startsWith('/api/participants')) {
+    return handleEvents(req);
+  }
+
   return json(404, { error: 'Not found' });
 }
 
@@ -318,5 +350,288 @@ async function handleAnalytics(
     const message = (err as Error).message || 'Analytics query failed';
     const isInput = /from|to|YYYY-MM-DD|custom period/i.test(message);
     return json(isInput ? 400 : 500, { error: message });
+  }
+}
+
+// ---- Workshops & Events ----------------------------------------------------
+
+/** CSV columns for the participant import template and the export file. */
+export const PARTICIPANT_CSV_COLUMNS = [
+  'name',
+  'company',
+  'designation',
+  'email',
+  'phone',
+  'isMember',
+  'attended',
+] as const;
+
+/**
+ * Accepted spellings for each import column. Spreadsheets that people actually
+ * keep say "Organisation" or "Mobile", and rejecting those would mean asking
+ * the team to rewrite a header row by hand before every upload.
+ */
+const CSV_HEADER_ALIASES: Record<string, string> = {
+  name: 'name',
+  fullname: 'name',
+  participant: 'name',
+  participantname: 'name',
+  company: 'company',
+  organisation: 'company',
+  organization: 'company',
+  firm: 'company',
+  designation: 'designation',
+  role: 'designation',
+  jobtitle: 'designation',
+  email: 'email',
+  emailaddress: 'email',
+  mail: 'email',
+  phone: 'phone',
+  mobile: 'phone',
+  contact: 'phone',
+  phonenumber: 'phone',
+  ismember: 'isMember',
+  member: 'isMember',
+  mcciamember: 'isMember',
+  attended: 'attended',
+  attendance: 'attended',
+  present: 'attended',
+};
+
+const normaliseHeader = (h: string) => h.toLowerCase().replace(/[^a-z]/g, '');
+
+const TRUTHY = new Set(['yes', 'y', 'true', '1', 'attended', 'present', 'member']);
+const truthy = (v: unknown) => TRUTHY.has(String(v ?? '').trim().toLowerCase());
+
+/** Maps one raw CSV row onto the participant field names. */
+function mapCsvRow(raw: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const field = CSV_HEADER_ALIASES[normaliseHeader(key)];
+    if (!field) continue;
+    out[field] = field === 'isMember' || field === 'attended' ? truthy(value) : value.trim();
+  }
+  return out;
+}
+
+/**
+ * Routes every /api/events and /api/participants request.
+ *
+ * Structured like handleAnalytics above: this function owns the routing and
+ * validation, server/events.ts owns the SQL. Unexpected failures are logged
+ * and answered with a fixed message — a raw Postgres error names columns and
+ * constraints, which is nothing the client should see.
+ */
+async function handleEvents(req: ApiRequest): Promise<ApiResponse> {
+  if (!hasSql) return json(503, { error: NO_SQL_MESSAGE });
+  const { method, pathname } = req;
+
+  try {
+    // GET /api/events/next-code?type=WORKSHOP — the form's code preview.
+    // Matched before the /:id routes, which would otherwise read "next-code"
+    // as an id.
+    if (pathname === '/api/events/next-code') {
+      if (method !== 'GET') return json(405, { error: 'Method not allowed' });
+      const type = pickEnum(req.query.get('type'), EVENT_TYPES, 'WORKSHOP');
+      if (!type) {
+        return json(400, { error: `type must be one of ${EVENT_TYPES.join(', ')}` });
+      }
+      return json(200, { code: await nextCode(type) });
+    }
+
+    // ---- /api/events -------------------------------------------------------
+    if (pathname === '/api/events') {
+      if (method === 'GET') {
+        const q = req.query;
+        const bad = (name: string, allowed: readonly string[]) =>
+          json(400, { error: `${name} must be one of ${allowed.join(', ')}` });
+
+        // Absent means "no filter"; present but unrecognised is a mistake worth
+        // reporting rather than silently ignoring.
+        const type = q.get('type');
+        if (type && !(EVENT_TYPES as readonly string[]).includes(type))
+          return bad('type', EVENT_TYPES);
+        const mode = q.get('mode');
+        if (mode && !['ONLINE', 'OFFLINE', 'HYBRID'].includes(mode))
+          return bad('mode', ['ONLINE', 'OFFLINE', 'HYBRID']);
+        const status = q.get('status');
+        if (status && !['UPCOMING', 'COMPLETED', 'CANCELLED'].includes(status))
+          return bad('status', ['UPCOMING', 'COMPLETED', 'CANCELLED']);
+
+        const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+        for (const key of ['from', 'to']) {
+          const v = q.get(key);
+          if (v && !DATE_RE.test(v))
+            return json(400, { error: `${key} must be a YYYY-MM-DD date` });
+        }
+
+        return json(
+          200,
+          await listEvents({
+            type,
+            mode,
+            status,
+            topic: q.get('topic'),
+            from: q.get('from'),
+            to: q.get('to'),
+            search: q.get('search'),
+            sort: q.get('sort'),
+            dir: q.get('dir'),
+          }),
+        );
+      }
+
+      if (method === 'POST') {
+        const parsed = eventSchema.safeParse(req.body ?? {});
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        return json(201, { event: await createEvent(parsed.data) });
+      }
+      return json(405, { error: 'Method not allowed' });
+    }
+
+    // ---- /api/events/:id[/participants[/import|/export|/attendance]] -------
+    const eventMatch = pathname.match(
+      /^\/api\/events\/([^/]+)(?:\/participants(?:\/(import|export|attendance))?)?$/,
+    );
+    if (eventMatch) {
+      const [, id, sub] = eventMatch;
+      const isParticipants = pathname.includes('/participants');
+
+      if (!isParticipants) {
+        if (method === 'GET') {
+          const event = await getEvent(id);
+          if (!event) return json(404, { error: 'Not found' });
+          return json(200, { event, participants: await listParticipants(id) });
+        }
+        if (method === 'PATCH') {
+          const parsed = eventUpdateSchema.safeParse(req.body ?? {});
+          if (!parsed.success)
+            return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+          const event = await updateEvent(id, parsed.data);
+          if (!event) return json(404, { error: 'Not found' });
+          return json(200, { event });
+        }
+        if (method === 'DELETE') {
+          // Participants go with it, via ON DELETE CASCADE.
+          const ok = await deleteEvent(id);
+          if (!ok) return json(404, { error: 'Not found' });
+          return json(200, { success: true });
+        }
+        return json(405, { error: 'Method not allowed' });
+      }
+
+      if (sub === 'export') {
+        if (method !== 'GET') return json(405, { error: 'Method not allowed' });
+        const event = await getEvent(id);
+        if (!event) return json(404, { error: 'Not found' });
+        const rows = (await listParticipants(id)).map((p) => ({
+          name: p.name,
+          company: p.company ?? '',
+          designation: p.designation ?? '',
+          email: p.email ?? '',
+          phone: p.phone ?? '',
+          isMember: p.isMember ? 'yes' : 'no',
+          attended: p.attended ? 'yes' : 'no',
+        }));
+        // Leading BOM so Excel on Windows reads it as UTF-8 rather than the
+        // system codepage, matching src/lib/spreadsheet.ts.
+        const csv = '﻿' + toCsv(rows, [...PARTICIPANT_CSV_COLUMNS]);
+        return {
+          status: 200,
+          binary: true,
+          body: new TextEncoder().encode(csv),
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${event.code}-participants.csv"`,
+            'Cache-Control': 'no-store',
+          },
+        };
+      }
+
+      if (sub === 'import') {
+        if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+        const body = (req.body ?? {}) as { csv?: string; rows?: unknown[] };
+
+        // Either raw CSV text or already-parsed rows. The UI sends the file
+        // contents; the rows form exists so the endpoint is usable directly.
+        const raw: Record<string, unknown>[] =
+          typeof body.csv === 'string'
+            ? parseCsv(body.csv).map(mapCsvRow)
+            : Array.isArray(body.rows)
+              ? (body.rows as Record<string, unknown>[])
+              : [];
+
+        if (raw.length === 0)
+          return json(422, { error: 'No rows found in that file' });
+
+        const valid: ParticipantWriteInput[] = [];
+        const errors: { row: number; message: string }[] = [];
+        raw.forEach((row, i) => {
+          const parsed = participantImportSchema.safeParse(row);
+          if (parsed.success) valid.push(parsed.data);
+          // +2 puts the number back in spreadsheet terms: row 1 is the header.
+          else errors.push({ row: i + 2, message: parsed.error.issues[0]?.message ?? 'Invalid row' });
+        });
+
+        const created = await importParticipants(id, valid);
+        return json(200, { created, skipped: errors.length, errors });
+      }
+
+      if (sub === 'attendance') {
+        if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+        const body = (req.body ?? {}) as { attended?: unknown };
+        const attended = body.attended !== false;
+        const event = await getEvent(id);
+        if (!event) return json(404, { error: 'Not found' });
+        return json(200, { updated: await setAllAttendance(id, attended) });
+      }
+
+      // /api/events/:id/participants
+      if (method === 'GET') {
+        const event = await getEvent(id);
+        if (!event) return json(404, { error: 'Not found' });
+        return json(200, { participants: await listParticipants(id) });
+      }
+      if (method === 'POST') {
+        const parsed = participantSchema.safeParse(req.body ?? {});
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        const participant = await addParticipant(id, parsed.data);
+        if (!participant) return json(404, { error: 'Not found' });
+        return json(201, { participant });
+      }
+      return json(405, { error: 'Method not allowed' });
+    }
+
+    // ---- /api/participants/:id --------------------------------------------
+    const participantMatch = pathname.match(/^\/api\/participants\/([^/]+)$/);
+    if (participantMatch) {
+      const id = participantMatch[1];
+      if (method === 'PATCH') {
+        const parsed = participantUpdateSchema.safeParse(req.body ?? {});
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        const participant = await updateParticipant(id, parsed.data);
+        if (!participant) return json(404, { error: 'Not found' });
+        return json(200, { participant });
+      }
+      if (method === 'DELETE') {
+        const ok = await deleteParticipant(id);
+        if (!ok) return json(404, { error: 'Not found' });
+        return json(200, { success: true });
+      }
+      return json(405, { error: 'Method not allowed' });
+    }
+
+    return json(404, { error: 'Not found' });
+  } catch (err) {
+    // EventError is a fault the caller can fix and carries its own status.
+    if (err instanceof EventError) return json(err.status, { error: err.message });
+    // Anything else is ours. Log the detail, return none of it — a Postgres
+    // error message names tables, columns and constraints.
+    // eslint-disable-next-line no-console
+    console.error('[events] error', err);
+    return json(500, { error: 'Something went wrong handling that request' });
   }
 }
