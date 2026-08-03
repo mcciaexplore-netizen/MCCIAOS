@@ -255,3 +255,108 @@ export interface EventSummary {
   attended: number;
   attendanceRate: number | null;
 }
+
+// ---- Daily Work Log -------------------------------------------------------
+// Backed by its own tables (db/daily-logs.sql). These vocabularies are CHECK
+// constraints in Postgres, not Settings entries, so they are literal unions.
+
+/**
+ * A team member. The first real identity row in the app — every other module
+ * still refers to a person by name (`records.assigned_to`), and this table is
+ * seeded from the same Settings roster. See the README.
+ */
+export interface User {
+  id: string;
+  name: string;
+  email: string | null;
+  role: 'ADMIN' | 'MEMBER';
+  active: boolean;
+}
+
+export type LogCategory =
+  | 'CONSULTATION'
+  | 'APPLICATION'
+  | 'WORKSHOP'
+  | 'MARKETING'
+  | 'OPERATIONS'
+  | 'RESEARCH'
+  | 'ADMIN'
+  | 'OTHER';
+
+export type LogStatus =
+  | 'PLANNED'
+  | 'IN_PROGRESS'
+  | 'DONE'
+  | 'BLOCKED'
+  | 'CARRIED_FORWARD';
+
+export type LogPriority = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface DailyLog {
+  id: string;
+  /** YYYY-MM-DD, an Asia/Kolkata calendar day. */
+  logDate: string;
+  userId: string;
+  /** Denormalised for display; the join is done server-side. */
+  userName: string;
+  title: string;
+  category: LogCategory;
+  description: string | null;
+  /** What was actually produced. Required before status can be DONE. */
+  output: string | null;
+  outputLink: string | null;
+  status: LogStatus;
+  priority: LogPriority | null;
+  timeSpentMins: number | null;
+  /** Required while status is BLOCKED. */
+  blockerNote: string | null;
+  /** The row this was rolled over from, if any. */
+  carriedFromId: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Whether a person reported at all on a given day. */
+export interface DailyCheckin {
+  id: string;
+  userId: string;
+  logDate: string;
+  daySummary: string | null;
+  submittedAt: string | null;
+}
+
+/** Per-person aggregates over a date range. */
+export interface DailySummaryRow {
+  userId: string;
+  userName: string;
+  tasks: number;
+  done: number;
+  inProgress: number;
+  blocked: number;
+  planned: number;
+  carriedForward: number;
+  /** done / tasks as a 0-100 percentage; null when nothing was logged. */
+  completionRate: number | null;
+  totalMins: number;
+}
+
+export interface CategoryCount {
+  category: LogCategory;
+  count: number;
+  totalMins: number;
+}
+
+/** The top strip on the Team Day view. */
+export interface DayStats {
+  totalTasks: number;
+  done: number;
+  inProgress: number;
+  blocked: number;
+  planned: number;
+  carriedForward: number;
+  /** Members with at least one entry, over active members. */
+  reported: number;
+  teamSize: number;
+  reportedPct: number | null;
+}

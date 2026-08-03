@@ -3,6 +3,9 @@ import type {
   EventMode,
   EventStatus,
   EventType,
+  LogCategory,
+  LogPriority,
+  LogStatus,
   TonedOption,
 } from '../types/index.js';
 
@@ -123,3 +126,41 @@ export const EVENT_TOPIC_SUGGESTIONS = [
   'Marketing',
   'AI Basics',
 ];
+
+// ---- Daily Work Log -------------------------------------------------------
+// CHECK constraints in Postgres (db/daily-logs.sql), stored upper-case. These
+// maps supply the sentence-case labels and the Badge tone for each.
+export const LOG_CATEGORY_LABELS: Record<LogCategory, string> = {
+  CONSULTATION: 'Consultation',
+  APPLICATION: 'Application',
+  WORKSHOP: 'Workshop',
+  MARKETING: 'Marketing',
+  OPERATIONS: 'Operations',
+  RESEARCH: 'Research',
+  ADMIN: 'Admin',
+  OTHER: 'Other',
+};
+
+export const LOG_STATUS_LABELS: Record<LogStatus, string> = {
+  PLANNED: 'Planned',
+  IN_PROGRESS: 'In progress',
+  DONE: 'Done',
+  BLOCKED: 'Blocked',
+  CARRIED_FORWARD: 'Carried forward',
+};
+
+export const LOG_STATUS_TONES: Record<LogStatus, string> = {
+  PLANNED: 'gray',
+  IN_PROGRESS: 'amber',
+  DONE: 'green',
+  BLOCKED: 'rose',
+  // Deliberately the same neutral as PLANNED; the chip component dims it, so a
+  // rolled-over task reads as history rather than as today's work.
+  CARRIED_FORWARD: 'gray',
+};
+
+export const LOG_PRIORITY_LABELS: Record<LogPriority, string> = {
+  HIGH: 'High',
+  MEDIUM: 'Medium',
+  LOW: 'Low',
+};

@@ -9,6 +9,7 @@ import {
   Code2,
   BarChart3,
   CalendarDays,
+  NotebookPen,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -25,6 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/companies', label: 'Companies', icon: Building2 },
   { to: '/consulting', label: 'Consulting', icon: MessageSquareText },
   { to: '/app-development', label: 'App Development', icon: KanbanSquare },
+  { to: '/daily', label: 'Daily Log', icon: NotebookPen },
   { to: '/events', label: 'Workshops & Events', icon: CalendarDays },
   { to: '/social', label: 'Social', icon: Megaphone },
   { to: '/resources', label: 'Resources', icon: Link2 },
