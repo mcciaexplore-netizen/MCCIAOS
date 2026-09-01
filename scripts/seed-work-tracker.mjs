@@ -39,28 +39,28 @@ const shift = (d) => {
 
 // Ten tasks covering every status, two of them shared.
 const TASKS = [
-  { title: 'Auto Cluster website — vendor deck',       owner: 'Rutuja', status: 'in_progress',  priority: 'high',     due: shift(6),  dl: shift(9),  approver: 'Sujal',  with: [['Taniya', 'contributor', shift(4)]] },
-  { title: 'GST reconciliation fix for Kirloskar',      owner: 'Sujal',  status: 'blocked',      priority: 'critical', due: shift(-2), dl: shift(1),  approver: 'Ismail', with: [['Pratik', 'reviewer', null]] },
-  { title: 'Workshop confirmation calls — September',   owner: 'Taniya', status: 'not_started',  priority: 'medium',   due: shift(1),  dl: shift(3),  approver: 'Rutuja', with: [] },
-  { title: 'Web analytics dashboard — initial setup',   owner: 'Taniya', status: 'submitted',    priority: 'high',     due: shift(-1), dl: shift(2),  approver: 'Sujal',  with: [] },
-  { title: 'MSME data digitization — case studies',     owner: 'Rutuja', status: 'approved',     priority: 'medium',   due: shift(-5), dl: shift(-3), approver: 'Ismail', with: [] },
-  { title: 'Cluster calling list — August round',       owner: 'Rutuja', status: 'completed',    priority: 'low',      due: shift(-8), dl: shift(-6), approver: 'Ismail', with: [] },
-  { title: 'Social media creatives — festive set',      owner: 'Ziya',   status: 'in_progress',  priority: 'medium',   due: shift(4),  dl: shift(7),  approver: 'Taniya', with: [] },
-  { title: 'Consultation intake form rework',           owner: 'Pratik', status: 'not_started',  priority: 'low',      due: shift(11), dl: shift(14), approver: 'Sujal',  with: [] },
-  { title: 'Mail merge for data dictionary outreach',   owner: 'Ismail', status: 'blocked',      priority: 'high',     due: shift(-3), dl: shift(0),  approver: 'Sujal',  with: [] },
-  { title: 'Quarterly impact report — draft',           owner: 'Sujal',  status: 'not_started',  priority: 'critical', due: shift(2),  dl: shift(2),  approver: 'Ismail', with: [] },
+  { type: 'story', title: 'Auto Cluster website — vendor deck',       owner: 'Rutuja', status: 'in_progress',  priority: 'high',     due: shift(6),  dl: shift(9),  approver: 'Sujal',  with: [['Taniya', 'contributor', shift(4)]] },
+  { type: 'bug', title: 'GST reconciliation fix for Kirloskar',      owner: 'Sujal',  status: 'blocked',      priority: 'critical', due: shift(-2), dl: shift(1),  approver: 'Ismail', with: [['Pratik', 'reviewer', null]] },
+  { type: 'task', title: 'Workshop confirmation calls — September',   owner: 'Taniya', status: 'not_started',  priority: 'medium',   due: shift(1),  dl: shift(3),  approver: 'Rutuja', with: [] },
+  { type: 'story', title: 'Web analytics dashboard — initial setup',   owner: 'Taniya', status: 'submitted',    priority: 'high',     due: shift(-1), dl: shift(2),  approver: 'Sujal',  with: [] },
+  { type: 'task', title: 'MSME data digitization — case studies',     owner: 'Rutuja', status: 'approved',     priority: 'medium',   due: shift(-5), dl: shift(-3), approver: 'Ismail', with: [] },
+  { type: 'task', title: 'Cluster calling list — August round',       owner: 'Rutuja', status: 'completed',    priority: 'low',      due: shift(-8), dl: shift(-6), approver: 'Ismail', with: [] },
+  { type: 'task', title: 'Social media creatives — festive set',      owner: 'Ziya',   status: 'in_progress',  priority: 'medium',   due: shift(4),  dl: shift(7),  approver: 'Taniya', with: [] },
+  { type: 'story', title: 'Consultation intake form rework',           owner: 'Pratik', status: 'not_started',  priority: 'low',      due: shift(11), dl: shift(14), approver: 'Sujal',  with: [] },
+  { type: 'admin', title: 'Mail merge for data dictionary outreach',   owner: 'Ismail', status: 'blocked',      priority: 'high',     due: shift(-3), dl: shift(0),  approver: 'Sujal',  with: [] },
+  { type: 'admin', title: 'Quarterly impact report — draft',           owner: 'Sujal',  status: 'not_started',  priority: 'critical', due: shift(2),  dl: shift(2),  approver: 'Ismail', with: [] },
 ];
 
 let made = 0;
 for (const t of TASKS) {
   const rows = await sql`
     insert into tasks
-      (title, description, status, priority, assignee_id, allocated_by, report_to,
+      (title, description, type, status, priority, assignee_id, allocated_by, report_to,
        approver_id, due_date, deadline, completed_at, approved_at)
     values (
       ${t.title},
       ${'Sample data for the Work Tracker. ' + MARKER},
-      ${t.status}, ${t.priority},
+      ${t.type}, ${t.status}, ${t.priority},
       ${by(t.owner)}::uuid, ${by('Sujal')}::uuid, ${by(t.approver)}::uuid,
       ${by(t.approver)}::uuid,
       ${t.due}::date, ${t.dl}::date,

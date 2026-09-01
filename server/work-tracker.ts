@@ -21,6 +21,7 @@ import type {
   TaskCollaborator,
   TaskPriority,
   TaskStatus,
+  TaskType,
   TaskTabCounts,
   TodayCounts,
   User,
@@ -60,6 +61,7 @@ interface TaskRow {
   ref: string;
   title: string;
   description: string | null;
+  type: string;
   status: string;
   priority: string;
   assignee_id: string;
@@ -90,7 +92,7 @@ interface TaskRow {
 // is_overdue / days_left / at_risk are computed here, never stored, so they
 // cannot go stale between the write and the read.
 const TASK_COLUMNS = `
-  t.id, t.ref, t.title, t.description, t.status, t.priority,
+  t.id, t.ref, t.title, t.description, t.type, t.status, t.priority,
   t.assignee_id, ua.name as assignee_name,
   t.allocated_by, ub.name as allocated_by_name,
   t.report_to,   ur.name as report_to_name,
@@ -135,6 +137,7 @@ function toTask(row: TaskRow): Task {
     ref: row.ref,
     title: row.title,
     description: row.description,
+    type: row.type as TaskType,
     status: row.status as TaskStatus,
     priority: row.priority as TaskPriority,
     assigneeId: row.assignee_id,
@@ -432,6 +435,7 @@ export async function getShared(assignee?: string | null): Promise<SharedTask[]>
 export interface TaskWriteInput {
   title: string;
   description?: string | null;
+  type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
   assigneeId: string;
@@ -474,10 +478,10 @@ export async function createTask(
 
   const rows = (await db.query(
     `insert into tasks
-       (title, description, status, priority, assignee_id, allocated_by,
+       (title, description, type, status, priority, assignee_id, allocated_by,
         report_to, approver_id, allocated_at, due_date, deadline,
         completed_at, approved_at)
-     values ($1, $2, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8::uuid,
+     values ($1, $2, $12, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8::uuid,
              coalesce($9::timestamptz, now()), $10::date, $11::date,
              case when $3 in ('submitted','approved','completed') then now() end,
              case when $3 in ('approved','completed') then now() end)
@@ -494,6 +498,7 @@ export async function createTask(
       input.allocatedAt ?? null,
       input.dueDate ?? null,
       input.deadline ?? null,
+      input.type,
     ],
   )) as { id: string }[];
 
@@ -510,6 +515,7 @@ export async function createTask(
 const PATCHABLE: Record<string, string> = {
   title: 'title',
   description: 'description',
+  type: 'type',
   status: 'status',
   priority: 'priority',
   assigneeId: 'assignee_id',

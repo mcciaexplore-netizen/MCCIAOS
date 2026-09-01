@@ -6,6 +6,7 @@ import type {
   EventType,
   TaskPriority,
   TaskStatus,
+  TaskType,
   TonedOption,
 } from '../types/index.js';
 
@@ -116,6 +117,23 @@ export const TASK_STATUSES = [
 
 export const TASK_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 
+export const TASK_TYPES = ['task', 'bug', 'story', 'admin'] as const;
+
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  task: 'Task',
+  bug: 'Bug',
+  story: 'Story',
+  admin: 'Admin',
+};
+
+/** Jira's issue-type square fills. */
+export const TASK_TYPE_FILL: Record<TaskType, string> = {
+  task: '#4BADE8',
+  bug: '#E5493A',
+  story: '#65BA43',
+  admin: '#6B778C',
+};
+
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   not_started: 'Not started',
   in_progress: 'In progress',
@@ -126,25 +144,25 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
 };
 
 /**
- * Dot colour per status. A dot plus text rather than a filled chip: a chip on
- * every row of a dense table is noise.
+ * Lozenge pairings, Atlassian exact. Filled rectangles, not dots and not pills.
+ * Values resolve through the .jira-table token block in src/index.css so dark
+ * mode keeps the same text/background contrast relationship.
  */
-export const TASK_STATUS_DOT: Record<TaskStatus, string> = {
-  not_started: 'bg-slate-400',
-  in_progress: 'bg-sky-500',
-  blocked: 'bg-rose-500',
-  submitted: 'bg-amber-500',
-  approved: 'bg-emerald-500',
-  completed: 'bg-emerald-500/60',
+export const TASK_STATUS_LOZENGE: Record<TaskStatus, { bg: string; fg: string }> = {
+  not_started: { bg: 'var(--n30)', fg: 'var(--n500)' },
+  in_progress: { bg: 'var(--b50)', fg: 'var(--b400)' },
+  blocked: { bg: 'var(--r50)', fg: 'var(--r400)' },
+  submitted: { bg: 'var(--y75)', fg: 'var(--y700)' },
+  approved: { bg: 'var(--g50)', fg: 'var(--g400)' },
+  completed: { bg: 'var(--g50)', fg: 'var(--g400)' },
 };
 
-export const TASK_STATUS_TEXT: Record<TaskStatus, string> = {
-  not_started: 'text-slate-500',
-  in_progress: 'text-sky-700 dark:text-sky-300',
-  blocked: 'text-rose-700 dark:text-rose-300',
-  submitted: 'text-amber-700 dark:text-amber-300',
-  approved: 'text-emerald-700 dark:text-emerald-300',
-  completed: 'text-emerald-700/70 dark:text-emerald-300/70',
+/** Priority is an icon only, no text label. Tooltip carries the name. */
+export const TASK_PRIORITY_COLOR: Record<TaskPriority, string> = {
+  critical: '#CD1317',
+  high: '#E9494A',
+  medium: '#E9730C',
+  low: '#2E7CD6',
 };
 
 export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
@@ -152,14 +170,6 @@ export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
   high: 'High',
   medium: 'Medium',
   low: 'Low',
-};
-
-/** Priority is a left border on the row, not another chip. Low gets nothing. */
-export const TASK_PRIORITY_BORDER: Record<TaskPriority, string> = {
-  critical: 'border-l-rose-500',
-  high: 'border-l-amber-500',
-  medium: 'border-l-slate-200 dark:border-l-slate-700',
-  low: 'border-l-transparent',
 };
 
 export const COLLABORATOR_ROLES = ['contributor', 'reviewer'] as const;

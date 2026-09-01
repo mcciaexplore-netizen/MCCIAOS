@@ -14,6 +14,7 @@ import {
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
+  TASK_TYPES,
   collaboratorSchema,
   collaboratorUpdateSchema,
   taskSchema,
@@ -648,6 +649,9 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
           return json(400, {
             error: `priority must be one of ${TASK_PRIORITIES.join(', ')}`,
           });
+        const type = query.get('type');
+        if (type && !(TASK_TYPES as readonly string[]).includes(type))
+          return json(400, { error: `type must be one of ${TASK_TYPES.join(', ')}` });
         const tab = query.get('tab');
         const TABS = ['all', 'assigned_to_me', 'due_soon', 'overdue', 'completed'];
         if (tab && !TABS.includes(tab))

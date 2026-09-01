@@ -15,6 +15,7 @@ export const TASK_STATUSES = [
 ] as const;
 
 export const TASK_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
+export const TASK_TYPES = ['task', 'bug', 'story', 'admin'] as const;
 export const COLLABORATOR_ROLES = ['contributor', 'reviewer'] as const;
 
 /** Statuses that count as finished, for the Completed tab and overdue logic. */
@@ -32,6 +33,7 @@ const nullableDate = isoDate.nullable().optional();
 const taskFields = z.object({
   title: z.string().trim().min(1, 'Give the task a title'),
   description: z.string().nullable().optional(),
+  type: z.enum(TASK_TYPES).default('task'),
   status: z.enum(TASK_STATUSES).default('not_started'),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   assigneeId: uuid,

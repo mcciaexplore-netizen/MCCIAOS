@@ -72,6 +72,7 @@ create table if not exists tasks (
   title         text not null,
   description   text,
 
+  type          text not null default 'task',
   status        text not null default 'not_started',
   priority      text not null default 'medium',
 
@@ -89,6 +90,10 @@ create table if not exists tasks (
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+
+-- `type` arrived with the Jira-anatomy table after `tasks` already existed, so
+-- the create above cannot introduce it on this database.
+alter table tasks add column if not exists type text not null default 'task';
 
 create index if not exists idx_tasks_assignee on tasks (assignee_id);
 create index if not exists idx_tasks_status   on tasks (status);
@@ -135,6 +140,11 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'tasks_status_check') then
     alter table tasks add constraint tasks_status_check
       check (status in ('not_started','in_progress','blocked','submitted','approved','completed'));
+  end if;
+
+  if not exists (select 1 from pg_constraint where conname = 'tasks_type_check') then
+    alter table tasks add constraint tasks_type_check
+      check (type in ('task','bug','story','admin'));
   end if;
 
   if not exists (select 1 from pg_constraint where conname = 'tasks_priority_check') then

@@ -1,9 +1,12 @@
-// Editable cell primitives for the Work Tracker table.
+// Work Tracker cell primitives, built to Atlassian/Jira anatomy.
+//
+// Colours come from the .jira-table token block in src/index.css rather than
+// Tailwind classes, so light and dark resolve from one place and the values
+// stay Atlassian's exact ones.
 //
 // Every cell follows the same contract: show the value, let the user change it
 // in place, hand the new value up, and never hold state the parent owns. The
-// parent does the optimistic update and the rollback, so a cell only has to
-// report "this is the new value" or "the user gave up".
+// parent does the optimistic update and the rollback.
 //
 // Escape reverts. Enter and blur commit. Dropdowns and dates commit on change.
 
@@ -14,28 +17,81 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
+import { ArrowDown, ArrowUp, ChevronsUp, Equal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  TASK_STATUS_DOT,
+  TASK_PRIORITY_COLOR,
+  TASK_PRIORITY_LABELS,
   TASK_STATUS_LABELS,
-  TASK_STATUS_TEXT,
+  TASK_STATUS_LOZENGE,
+  TASK_TYPE_FILL,
+  TASK_TYPE_LABELS,
 } from '@/constants';
-import type { TaskStatus, User } from '@/types';
+import type { TaskPriority, TaskStatus, TaskType, User } from '@/types';
+
+// ---- Type square ----------------------------------------------------------
+
+/** 16x16 solid square, Jira's issue-type marker. */
+export function TypeSquare({ type }: { type: TaskType }) {
+  return (
+    <span
+      title={TASK_TYPE_LABELS[type]}
+      aria-label={TASK_TYPE_LABELS[type]}
+      style={{ background: TASK_TYPE_FILL[type], borderRadius: 3 }}
+      className="inline-block h-4 w-4 shrink-0"
+    />
+  );
+}
 
 // ---- Avatar ---------------------------------------------------------------
 
 /**
- * Initials on a colour derived from the name, so the same person is the same
- * colour everywhere without storing anything. Nobody has an avatar_url yet.
+ * 24px circle with initials. The name is deliberately not rendered — Jira
+ * shows the avatar alone and puts the name in the tooltip, which is what keeps
+ * the people columns to 40px.
  */
-const AVATAR_TONES = [
-  'bg-brand-100 text-brand-700 dark:bg-brand-950 dark:text-brand-300',
-  'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
-  'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
-  'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300',
-  'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300',
-  'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300',
-];
+export function Avatar({
+  name,
+  size = 24,
+  ring = false,
+  dot = false,
+  className,
+}: {
+  name: string;
+  size?: number;
+  ring?: boolean;
+  /** Marks a collaborator who carries their own due date. */
+  dot?: boolean;
+  className?: string;
+}) {
+  const initials = initialsOf(name);
+  return (
+    <span className={cn('relative inline-flex shrink-0', className)}>
+      <span
+        title={name}
+        aria-label={name}
+        style={{
+          width: size,
+          height: size,
+          fontSize: Math.round(size * 0.42),
+          background: tintFor(name),
+          color: '#fff',
+          boxShadow: ring ? '0 0 0 2px var(--n0)' : undefined,
+        }}
+        className="inline-flex items-center justify-center rounded-full font-semibold"
+      >
+        {initials}
+      </span>
+      {dot && (
+        <span
+          title={`${name} has their own due date`}
+          style={{ background: 'var(--y400)', boxShadow: '0 0 0 1.5px var(--n0)' }}
+          className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full"
+        />
+      )}
+    </span>
+  );
+}
 
 export function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -44,62 +100,42 @@ export function initialsOf(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-function toneFor(name: string): string {
+// Atlassian-ish avatar fills, picked deterministically so one person is always
+// one colour without storing anything.
+const AVATAR_FILLS = ['#0052CC', '#00875A', '#5243AA', '#BF2600', '#0747A6', '#006644'];
+function tintFor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return AVATAR_TONES[Math.abs(hash) % AVATAR_TONES.length];
+  return AVATAR_FILLS[Math.abs(hash) % AVATAR_FILLS.length];
 }
 
-export function Avatar({
-  name,
-  size = 'sm',
-  className,
-}: {
-  name: string;
-  size?: 'xs' | 'sm' | 'lg';
-  className?: string;
-}) {
-  const dims =
-    size === 'lg' ? 'h-11 w-11 text-sm' : size === 'xs' ? 'h-5 w-5 text-[9px]' : 'h-7 w-7 text-[11px]';
-  return (
-    <span
-      title={name}
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-full font-semibold',
-        dims,
-        toneFor(name),
-        className,
-      )}
-    >
-      {initialsOf(name)}
-    </span>
-  );
-}
-
-/** Overlapping avatars for the people on a task. */
+/** Overlapping avatars, Jira's -8px with a 2px ring in the row colour. */
 export function AvatarStack({
-  names,
+  people,
   max = 3,
-  size = 'xs',
 }: {
-  names: string[];
+  people: { name: string; dot?: boolean }[];
   max?: number;
-  size?: 'xs' | 'sm';
 }) {
-  const shown = names.slice(0, max);
-  const extra = names.length - shown.length;
+  const shown = people.slice(0, max);
+  const extra = people.length - shown.length;
   return (
     <span className="inline-flex items-center">
-      {shown.map((n, i) => (
+      {shown.map((p, i) => (
         <Avatar
-          key={n + i}
-          name={n}
-          size={size}
-          className={cn('ring-2 ring-white dark:ring-slate-900', i > 0 && '-ml-1.5')}
+          key={p.name + i}
+          name={p.name}
+          size={24}
+          ring
+          dot={p.dot}
+          className={i > 0 ? '-ml-2' : undefined}
         />
       ))}
       {extra > 0 && (
-        <span className="-ml-1.5 inline-flex h-5 items-center rounded-full bg-slate-100 px-1.5 text-[10px] font-medium text-slate-500 ring-2 ring-white dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-900">
+        <span
+          style={{ background: 'var(--n30)', color: 'var(--n500)', boxShadow: '0 0 0 2px var(--n0)' }}
+          className="-ml-2 inline-flex h-6 items-center rounded-full px-1.5 text-[10px] font-semibold"
+        >
           +{extra}
         </span>
       )}
@@ -107,36 +143,60 @@ export function AvatarStack({
   );
 }
 
-// ---- Status --------------------------------------------------------------
+// ---- Status lozenge -------------------------------------------------------
 
-/** Dot plus text. A filled chip on every row of a dense table is noise. */
-export function StatusDot({ status }: { status: TaskStatus }) {
+/** Filled rectangle, uppercase. Not a dot, not a pill. */
+export function Lozenge({ status }: { status: TaskStatus }) {
+  const { bg, fg } = TASK_STATUS_LOZENGE[status];
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span className={cn('h-2 w-2 shrink-0 rounded-full', TASK_STATUS_DOT[status])} />
-      <span className={cn('text-sm', TASK_STATUS_TEXT[status])}>
-        {TASK_STATUS_LABELS[status]}
-      </span>
+    <span
+      style={{
+        background: bg,
+        color: fg,
+        padding: '2px 6px',
+        borderRadius: 3,
+        fontSize: 11,
+        fontWeight: 700,
+        lineHeight: '16px',
+        letterSpacing: '0.3px',
+      }}
+      className="inline-block whitespace-nowrap uppercase"
+    >
+      {TASK_STATUS_LABELS[status]}
     </span>
+  );
+}
+
+// ---- Priority icon --------------------------------------------------------
+
+const PRIORITY_ICON = {
+  critical: ChevronsUp,
+  high: ArrowUp,
+  medium: Equal,
+  low: ArrowDown,
+} as const;
+
+/** Icon only, 16px. The label lives in the tooltip, as in Jira. */
+export function PriorityIcon({ priority }: { priority: TaskPriority }) {
+  const Icon = PRIORITY_ICON[priority];
+  return (
+    <Icon
+      className="h-4 w-4 shrink-0"
+      style={{ color: TASK_PRIORITY_COLOR[priority] }}
+      aria-label={TASK_PRIORITY_LABELS[priority]}
+    />
   );
 }
 
 // ---- Shared cell chrome ---------------------------------------------------
 
-const cellBase =
-  'w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-left text-sm ' +
-  'hover:border-slate-200 focus:border-brand-500 focus:bg-white focus:outline-none ' +
-  'focus:ring-2 focus:ring-brand-500/30 dark:hover:border-slate-700 dark:focus:bg-slate-800';
-
 export interface CellProps {
-  /** Set while this cell's PATCH is in flight. */
   saving?: boolean;
-  /** Set when the last save for this cell failed. */
   error?: string | null;
   disabled?: boolean;
 }
 
-/** Wraps a cell so the saving pulse and the inline error are drawn identically. */
+/** Draws the saving pulse and the inline error identically for every cell. */
 export function CellShell({
   saving,
   error,
@@ -145,25 +205,29 @@ export function CellShell({
   return (
     <div className="min-w-0">
       <div
-        className={cn(
-          'rounded-md',
-          saving && 'animate-pulse ring-1 ring-brand-400/60',
-          error && 'ring-1 ring-rose-500',
-        )}
+        style={error ? { boxShadow: '0 0 0 1px var(--r400)', borderRadius: 3 } : undefined}
+        className={cn(saving && 'animate-pulse')}
       >
         {children}
       </div>
       {error && (
-        <p className="mt-0.5 px-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>
+        <p style={{ color: 'var(--r400)' }} className="mt-0.5 text-[11px]">
+          {error}
+        </p>
       )}
     </div>
   );
 }
 
+const cellBase =
+  'w-full bg-transparent px-1 py-0.5 text-left text-sm text-[color:var(--n800)] ' +
+  'rounded-[3px] border border-transparent hover:border-[color:var(--n40)] ' +
+  'focus:outline-none focus:bg-[color:var(--n0)]';
+
 // ---- Text -----------------------------------------------------------------
 
 /**
- * Commits on Enter or blur, never per keystroke — so there is no request to
+ * Commits on Enter or blur, never per keystroke, so there is no request to
  * debounce. Escape restores the value that was there when editing began.
  */
 export function EditableText({
@@ -173,12 +237,10 @@ export function EditableText({
   saving,
   error,
   disabled,
-  className,
 }: CellProps & {
   value: string;
   onSave: (next: string) => void;
   placeholder?: string;
-  className?: string;
 }) {
   const [draft, setDraft] = useState(value);
   const committed = useRef(value);
@@ -192,8 +254,7 @@ export function EditableText({
     const next = draft.trim();
     if (next === committed.current) return;
     if (next === '') {
-      // Required field: revert rather than storing an empty title.
-      setDraft(committed.current);
+      setDraft(committed.current); // required field: revert, never store blank
       return;
     }
     committed.current = next;
@@ -220,51 +281,56 @@ export function EditableText({
             e.currentTarget.blur();
           }
         }}
-        className={cn(cellBase, 'font-medium text-slate-800 dark:text-slate-100', className)}
+        className={cn(cellBase, 'truncate')}
       />
     </CellShell>
   );
 }
 
-// ---- Select ---------------------------------------------------------------
+// ---- Icon-fronted select --------------------------------------------------
 
-export function EditableSelect<T extends string>({
+/**
+ * A native select rendered behind a visual (lozenge, icon, square, avatar), so
+ * the control keeps native keyboard and mobile behaviour while looking like
+ * Jira's inline menus.
+ */
+export function IconSelect<T extends string>({
   value,
   options,
+  labels,
   onSave,
+  render,
   saving,
   error,
   disabled,
-  renderValue,
+  width,
   optionDisabled,
   optionTitle,
+  ariaLabel,
 }: CellProps & {
   value: T;
   options: readonly T[];
+  labels: Record<T, string>;
   onSave: (next: T) => void;
-  renderValue?: (v: T) => ReactNode;
-  labels?: Record<T, string>;
+  render: (v: T) => ReactNode;
+  width?: number;
   optionDisabled?: (v: T) => boolean;
   optionTitle?: (v: T) => string | undefined;
+  ariaLabel: string;
 }) {
   return (
     <CellShell saving={saving} error={error}>
-      <div className="relative">
-        {renderValue && (
-          <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center">
-            {renderValue(value)}
-          </span>
-        )}
+      <span className="relative inline-flex items-center" style={{ width }}>
+        <span className="pointer-events-none absolute left-0 flex items-center">
+          {render(value)}
+        </span>
         <select
           value={value}
           disabled={disabled}
           data-cell
+          aria-label={ariaLabel}
           onChange={(e) => onSave(e.target.value as T)}
-          className={cn(
-            cellBase,
-            'cursor-pointer appearance-none pr-6',
-            renderValue && 'text-transparent',
-          )}
+          className="w-full cursor-pointer rounded-[3px] border border-transparent bg-transparent py-0.5 text-transparent hover:border-[color:var(--n40)] focus:outline-none"
         >
           {options.map((o) => (
             <option
@@ -272,18 +338,31 @@ export function EditableSelect<T extends string>({
               value={o}
               disabled={optionDisabled?.(o)}
               title={optionTitle?.(o)}
-              className="text-slate-900 dark:text-slate-100"
+              className="text-[color:var(--n800)]"
             >
-              {String(o)}
+              {labels[o]}
             </option>
           ))}
         </select>
-      </div>
+      </span>
     </CellShell>
   );
 }
 
 // ---- Date -----------------------------------------------------------------
+
+/** `12 Sep` in the current year, `12 Sep 2025` otherwise. */
+export function formatJiraDate(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return '';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
 
 export function EditableDate({
   value,
@@ -292,40 +371,68 @@ export function EditableDate({
   error,
   disabled,
   min,
-  tone,
+  overdue,
+  ariaLabel,
 }: CellProps & {
   value: string | null;
   onSave: (next: string | null) => void;
   min?: string;
-  tone?: 'danger';
+  overdue?: boolean;
+  ariaLabel: string;
 }) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <CellShell saving={saving} error={error}>
+        <input
+          type="date"
+          autoFocus
+          defaultValue={value ?? ''}
+          min={min}
+          data-cell
+          aria-label={ariaLabel}
+          onChange={(e) => {
+            onSave(e.target.value === '' ? null : e.target.value);
+            setEditing(false);
+          }}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setEditing(false);
+            }
+          }}
+          className={cn(cellBase, 'tabular-nums')}
+        />
+      </CellShell>
+    );
+  }
+
+  // Reads as plain text until clicked, so a dense row is not a wall of native
+  // date widgets.
   return (
     <CellShell saving={saving} error={error}>
-      <input
-        type="date"
-        value={value ?? ''}
-        min={min}
-        disabled={disabled}
+      <button
         data-cell
-        onChange={(e) => onSave(e.target.value === '' ? null : e.target.value)}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        onClick={() => setEditing(true)}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') e.currentTarget.blur();
+          if (e.key === 'Enter') setEditing(true);
         }}
-        className={cn(
-          cellBase,
-          'tabular-nums',
-          tone === 'danger'
-            ? 'text-rose-600 dark:text-rose-400'
-            : 'text-slate-600 dark:text-slate-300',
-        )}
-      />
+        style={{ color: overdue ? 'var(--r400)' : 'var(--n200)' }}
+        className={cn(cellBase, 'tabular-nums')}
+      >
+        {value ? formatJiraDate(value) : '—'}
+      </button>
     </CellShell>
   );
 }
 
-// ---- User picker ----------------------------------------------------------
+// ---- User picker, avatar only ---------------------------------------------
 
-export function UserPicker({
+export function UserCell({
   value,
   users,
   onSave,
@@ -333,45 +440,56 @@ export function UserPicker({
   error,
   disabled,
   allowEmpty = true,
-  emptyLabel = 'Unassigned',
-  showAvatar = true,
+  ariaLabel,
 }: CellProps & {
   value: string | null;
   users: User[];
   onSave: (next: string | null) => void;
   allowEmpty?: boolean;
-  emptyLabel?: string;
-  showAvatar?: boolean;
+  ariaLabel: string;
 }) {
   const current = users.find((u) => u.id === value);
   return (
     <CellShell saving={saving} error={error}>
-      <div className="relative flex items-center gap-1.5">
-        {showAvatar && current && <Avatar name={current.name} size="sm" />}
+      <span className="relative inline-flex h-6 w-6 items-center">
+        <span className="pointer-events-none absolute inset-0 flex items-center">
+          {current ? (
+            <Avatar name={current.name} size={24} />
+          ) : (
+            <span
+              style={{ background: 'var(--n30)', color: 'var(--n200)' }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px]"
+              title="Nobody"
+            >
+              ?
+            </span>
+          )}
+        </span>
         <select
           value={value ?? ''}
           disabled={disabled}
           data-cell
+          aria-label={ariaLabel}
           onChange={(e) => onSave(e.target.value === '' ? null : e.target.value)}
-          className={cn(cellBase, 'cursor-pointer truncate text-slate-700 dark:text-slate-200')}
+          className="h-6 w-6 cursor-pointer rounded-full border-0 bg-transparent text-transparent opacity-0 focus:opacity-100 focus:outline-none"
         >
-          {allowEmpty && <option value="">{emptyLabel}</option>}
+          {allowEmpty && <option value="">Nobody</option>}
           {users.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name}
             </option>
           ))}
         </select>
-      </div>
+      </span>
     </CellShell>
   );
 }
 
-/** Read-only cell for the two auto-set timestamps. */
-export function ReadOnlyCell({ children }: { children: ReactNode }) {
+/** Auto-set timestamps, muted and not editable. */
+export function ReadOnlyDate({ value }: { value: string | null }) {
   return (
-    <span className="block px-2 py-1 text-sm tabular-nums text-slate-400">
-      {children}
+    <span style={{ color: 'var(--n200)' }} className="block px-1 text-sm tabular-nums">
+      {value ? formatJiraDate(value) : '—'}
     </span>
   );
 }

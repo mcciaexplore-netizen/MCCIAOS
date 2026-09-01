@@ -90,6 +90,31 @@ One screen at `/work-tracker`: a header strip and a single editable table where
 every field is changed in place. Backed by `tasks`, `task_collaborators` and
 `task_activity` in `db/work-tracker.sql`.
 
+### Table anatomy
+
+The table is built to **Atlassian/Jira anatomy**, not this app's usual style:
+Jira neutrals, 32px dense rows, a `border-bottom` and no left colour bar,
+filled uppercase lozenges for status, icon-only priority, and avatar-only people
+columns with the name in the tooltip. Rows are uniform — collaborator rows are
+deliberately **not** tinted; the stacked avatars in the With column carry that
+signal, and a collaborator with their own `member_due_date` gets a small dot on
+their avatar.
+
+Those tokens are scoped to `.jira-table` in `src/index.css`, so the surrounding
+MCCIA shell, nav and buttons keep their own language. The module spec asks both
+for Jira's exact table and for the existing MCCIA tokens; scoping is what lets
+both be true.
+
+Columns run Type, Key, Summary, Assignee, With, Status, Priority, Allocated,
+Due, Deadline, Completed, Reports to, Approver, Approved. **The first four are
+sticky**; everything from With rightward scrolls. Column visibility is
+per-user in `localStorage`.
+
+Dark mode is kept rather than dropped: spec 6.6 puts it out of scope "unless
+MCCIA OS already has it", and it does. Atlassian publishes light values only,
+so `.dark .jira-table` resolves the same roles against a dark surface, keeping
+each lozenge's text/background pairing intact.
+
 **One table for the whole team.** `tasks` is filtered by `assignee_id`; there is
 no table, schema or database per person. The user dropdown is a filter, not a
 database switch — splitting per user would make the team view, the overdue
@@ -99,6 +124,8 @@ report and the workload summary impossible to build.
 
 - **Status pipeline:** not started → in progress → blocked → submitted →
   approved → completed.
+- **Issue type** is `task`, `bug`, `story` or `admin`, shown as the coloured
+  square in the first column.
 - Moving to `submitted` stamps `completed_at`; moving to `approved` stamps
   `approved_at`. Moving back out clears them and writes an activity row.
 - **Only the task's approver may set `approved`.** The option renders disabled

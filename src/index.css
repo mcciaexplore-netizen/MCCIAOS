@@ -29,3 +29,117 @@ body {
 *::-webkit-scrollbar-thumb {
   @apply rounded-full bg-slate-300 dark:bg-slate-700;
 }
+
+/* ---------------------------------------------------------------------------
+   Work Tracker table — Atlassian/Jira anatomy.
+
+   Scoped to .jira-table so the rest of MCCIA OS keeps its own language: the
+   shell, nav and buttons stay MCCIA, the issue table is Jira. The module spec
+   asks for Jira's exact values and says not to invent a table style, so the
+   neutrals are Atlassian's unchanged.
+
+   Dark mode is in scope because this app already has a theme toggle (spec 6.6).
+   Atlassian publishes light values only, so the dark column below is the same
+   roles resolved against a dark surface, keeping the lozenge text/background
+   contrast pairings intact.
+--------------------------------------------------------------------------- */
+.jira-table {
+  --n0: #ffffff;
+  --n20: #f4f5f7;
+  --n30: #ebecf0;
+  --n40: #dfe1e6;
+  --n200: #6b778c;
+  --n500: #42526e;
+  --n800: #172b4d;
+
+  --b400: #0052cc;
+  --b50: #deebff;
+  --g400: #00875a;
+  --g50: #e3fcef;
+  --y400: #ff991f;
+  --y75: #fff0b3;
+  --y700: #974f0c;
+  --r400: #de350b;
+  --r50: #ffebe6;
+
+  --radius-jira: 3px;
+
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+}
+
+.dark .jira-table {
+  --n0: #1d2125;
+  --n20: #22272b;
+  --n30: #2c333a;
+  --n40: #38414a;
+  --n200: #9fadbc;
+  --n500: #b6c2cf;
+  --n800: #dee4ea;
+
+  --b400: #579dff;
+  --b50: #1c2b41;
+  --g400: #7ee2b8;
+  --g50: #1c3329;
+  --y400: #f5cd47;
+  --y75: #3d3211;
+  --y700: #f5cd47;
+  --r400: #ff9c8f;
+  --r50: #42221f;
+}
+
+/* 32px content rows, dense. Desktop only; the mobile view is cards. */
+.jira-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--n40);
+  background: var(--n0);
+  height: 32px;
+  white-space: nowrap;
+}
+.jira-table tbody tr:hover td {
+  background: var(--n20);
+}
+.jira-table th {
+  padding: 8px;
+  background: var(--n20);
+  color: var(--n200);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+/* The row menu is revealed on hover, as in Jira. Focus keeps it reachable. */
+.jira-table .row-menu {
+  opacity: 0;
+}
+.jira-table tbody tr:hover .row-menu,
+.jira-table .row-menu:focus-within {
+  opacity: 1;
+}
+
+/* Focused cell ring, Jira's 2px blue. */
+.jira-table [data-cell]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--b400);
+  border-radius: var(--radius-jira);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jira-table * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Visually-hidden label for the icon-only table headers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

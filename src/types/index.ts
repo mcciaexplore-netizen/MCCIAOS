@@ -210,6 +210,9 @@ export type TaskStatus =
 
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 
+/** Issue type, shown as the coloured square in the first column. */
+export type TaskType = 'task' | 'bug' | 'story' | 'admin';
+
 export type CollaboratorRole = 'contributor' | 'reviewer';
 
 export interface TaskCollaborator {
@@ -228,6 +231,7 @@ export interface Task {
   ref: string;
   title: string;
   description: string | null;
+  type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
 
