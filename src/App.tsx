@@ -2,10 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from '@/components/AppLayout';
 
-const DailyTeam = lazy(() => import('@/pages/DailyTeam'));
-const DailyMy = lazy(() => import('@/pages/DailyMy'));
-const DailyPerson = lazy(() => import('@/pages/DailyPerson'));
-const DailySummary = lazy(() => import('@/pages/DailySummary'));
+const WorkTracker = lazy(() => import('@/pages/WorkTracker'));
 const Events = lazy(() => import('@/pages/Events'));
 const EventForm = lazy(() => import('@/pages/EventForm'));
 const EventDetail = lazy(() => import('@/pages/EventDetail'));
@@ -34,14 +31,18 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<AppLayout />}>
-          {/* Daily Log is the landing page now that the Dashboard is gone. */}
-          <Route path="/" element={<Navigate to="/daily" replace />} />
-          {/* Static segments before the dynamic one, so /daily/my and
-              /daily/summary are never read as a user id. */}
-          <Route path="/daily" element={page(DailyTeam)} />
-          <Route path="/daily/my" element={page(DailyMy)} />
-          <Route path="/daily/summary" element={page(DailySummary)} />
-          <Route path="/daily/person/:userId" element={page(DailyPerson)} />
+          {/* Work Tracker is the landing page. */}
+          <Route path="/" element={<Navigate to="/work-tracker" replace />} />
+          <Route path="/work-tracker" element={page(WorkTracker)} />
+
+          {/* Old Daily Work Log paths, kept so bookmarks do not break. The
+              module spec asked for these as next.config.js redirects; this is
+              a Vite SPA with react-router, so they are routes. The module
+              lived at /daily, not /daily-logs — both are covered. */}
+          <Route path="/daily" element={<Navigate to="/work-tracker" replace />} />
+          <Route path="/daily/*" element={<Navigate to="/work-tracker" replace />} />
+          <Route path="/daily-logs" element={<Navigate to="/work-tracker" replace />} />
+          <Route path="/daily-logs/*" element={<Navigate to="/work-tracker" replace />} />
           <Route path="/events" element={page(Events)} />
           <Route path="/events/new" element={page(EventForm)} />
           <Route path="/events/:id" element={page(EventDetail)} />
@@ -51,7 +52,7 @@ export default function App() {
           <Route path="/messages" element={page(Messages)} />
           <Route path="/templates" element={page(Templates)} />
           <Route path="/settings" element={page(Settings)} />
-          <Route path="*" element={<Navigate to="/daily" replace />} />
+          <Route path="*" element={<Navigate to="/work-tracker" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -178,107 +178,122 @@ export interface EventSummary {
   attendanceRate: number | null;
 }
 
-// ---- Daily Work Log -------------------------------------------------------
-// Backed by its own tables (db/daily-logs.sql). These vocabularies are CHECK
-// constraints in Postgres, not Settings entries, so they are literal unions.
+// ---- Work Tracker ---------------------------------------------------------
+// Backed by its own tables (db/work-tracker.sql). Replaces the Daily Work Log,
+// whose data lives on in daily_logs_archive.
 
 /**
- * A team member. The first real identity row in the app — every other module
- * still refers to a person by name (`records.assigned_to`), and this table is
- * seeded from the same Settings roster. See the README.
+ * A team member. Seeded from the Settings roster; `email` is nullable because
+ * the existing rows have none and inventing addresses would be fabricating
+ * data. See db/work-tracker.sql.
  */
 export interface User {
   id: string;
   name: string;
   email: string | null;
   role: 'ADMIN' | 'MEMBER';
-  active: boolean;
+  designation: string | null;
+  department: string | null;
+  reportsTo: string | null;
+  avatarUrl: string | null;
+  isActive: boolean;
 }
 
-export type LogCategory =
-  | 'CONSULTATION'
-  | 'APPLICATION'
-  | 'WORKSHOP'
-  | 'MARKETING'
-  | 'OPERATIONS'
-  | 'RESEARCH'
-  | 'ADMIN'
-  | 'OTHER';
+/** The pipeline, in order. */
+export type TaskStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'blocked'
+  | 'submitted'
+  | 'approved'
+  | 'completed';
 
-export type LogStatus =
-  | 'PLANNED'
-  | 'IN_PROGRESS'
-  | 'DONE'
-  | 'BLOCKED'
-  | 'CARRIED_FORWARD';
+export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 
-export type LogPriority = 'HIGH' | 'MEDIUM' | 'LOW';
+export type CollaboratorRole = 'contributor' | 'reviewer';
 
-export interface DailyLog {
-  id: string;
-  /** YYYY-MM-DD, an Asia/Kolkata calendar day. */
-  logDate: string;
+export interface TaskCollaborator {
+  taskId: string;
   userId: string;
-  /** Denormalised for display; the join is done server-side. */
   userName: string;
+  role: CollaboratorRole;
+  /** This person's own deadline, independent of the task due date. */
+  memberDueDate: string | null;
+  allocatedAt: string;
+}
+
+export interface Task {
+  id: string;
+  /** Human reference, e.g. WT-0042. Assigned by a database trigger. */
+  ref: string;
   title: string;
-  category: LogCategory;
   description: string | null;
-  /** What was actually produced. Required before status can be DONE. */
-  output: string | null;
-  outputLink: string | null;
-  status: LogStatus;
-  priority: LogPriority | null;
-  timeSpentMins: number | null;
-  /** Required while status is BLOCKED. */
-  blockerNote: string | null;
-  /** The row this was rolled over from, if any. */
-  carriedFromId: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+
+  assigneeId: string;
+  assigneeName: string;
+  allocatedBy: string | null;
+  allocatedByName: string | null;
+  reportTo: string | null;
+  reportToName: string | null;
+  approverId: string | null;
+  approverName: string | null;
+
+  allocatedAt: string;
+  /** YYYY-MM-DD. Working target. */
+  dueDate: string | null;
+  /** YYYY-MM-DD. Hard limit; never earlier than dueDate. */
+  deadline: string | null;
   completedAt: string | null;
+  approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
+
+  collaborators: TaskCollaborator[];
+
+  // ---- Derived, computed per request; never stored -------------------------
+  /** due_date < today and not yet approved or completed. */
+  isOverdue: boolean;
+  /** Whole days until due_date; negative when past. Null with no due date. */
+  daysLeft: number | null;
+  /** Due within two days and not yet started, or blocked. */
+  atRisk: boolean;
 }
 
-/** Whether a person reported at all on a given day. */
-export interface DailyCheckin {
+/** One change to one field, for the activity trail. */
+export interface TaskActivity {
   id: string;
-  userId: string;
-  logDate: string;
-  daySummary: string | null;
-  submittedAt: string | null;
+  taskId: string;
+  actorId: string | null;
+  actorName: string | null;
+  field: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changedAt: string;
 }
 
-/** Per-person aggregates over a date range. */
-export interface DailySummaryRow {
-  userId: string;
-  userName: string;
-  tasks: number;
-  done: number;
-  inProgress: number;
-  blocked: number;
-  planned: number;
-  carriedForward: number;
-  /** done / tasks as a 0-100 percentage; null when nothing was logged. */
-  completionRate: number | null;
-  totalMins: number;
+/** Counts for every tab, returned in one call so badges need one request. */
+export interface TaskTabCounts {
+  all: number;
+  assigned_to_me: number;
+  due_soon: number;
+  overdue: number;
+  completed: number;
 }
 
-export interface CategoryCount {
-  category: LogCategory;
-  count: number;
-  totalMins: number;
+/** Date-scoped counts for the header's Today block. */
+export interface TodayCounts {
+  date: string;
+  dueToday: number;
+  overdue: number;
+  completedToday: number;
 }
 
-/** The top strip on the Team Day view. */
-export interface DayStats {
-  totalTasks: number;
-  done: number;
-  inProgress: number;
-  blocked: number;
-  planned: number;
-  carriedForward: number;
-  /** Members with at least one entry, over active members. */
-  reported: number;
-  teamSize: number;
-  reportedPct: number | null;
+/** A task with two or more people, for the Working together block. */
+export interface SharedTask {
+  id: string;
+  ref: string;
+  title: string;
+  people: { id: string; name: string }[];
 }

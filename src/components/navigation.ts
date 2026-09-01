@@ -1,5 +1,5 @@
 import {
-  NotebookPen,
+  ListChecks,
   CalendarDays,
   Megaphone,
   Link2,
@@ -17,10 +17,10 @@ export interface NavItem {
 // Settings is deliberately absent: it is reached from the icon above the nav
 // in AppLayout, not listed as a workspace destination.
 //
-// Daily Log leads because "/" redirects to it — it is the module the team
-// opens every day, and the Dashboard that used to hold that slot is gone.
+// Work Tracker leads because "/" redirects to it. It took this slot from the
+// Daily Work Log, which it replaces.
 export const NAV_ITEMS: NavItem[] = [
-  { to: '/daily', label: 'Daily Log', icon: NotebookPen },
+  { to: '/work-tracker', label: 'Work Tracker', icon: ListChecks },
   { to: '/events', label: 'Workshops & Events', icon: CalendarDays },
   { to: '/social', label: 'Social', icon: Megaphone },
   { to: '/resources', label: 'Resources', icon: Link2 },

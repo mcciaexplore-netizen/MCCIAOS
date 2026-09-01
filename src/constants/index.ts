@@ -1,11 +1,11 @@
 import type {
   AppSettings,
+  CollaboratorRole,
   EventMode,
   EventStatus,
   EventType,
-  LogCategory,
-  LogPriority,
-  LogStatus,
+  TaskPriority,
+  TaskStatus,
   TonedOption,
 } from '../types/index.js';
 
@@ -100,40 +100,71 @@ export const EVENT_TOPIC_SUGGESTIONS = [
   'AI Basics',
 ];
 
-// ---- Daily Work Log -------------------------------------------------------
-// CHECK constraints in Postgres (db/daily-logs.sql), stored upper-case. These
-// maps supply the sentence-case labels and the Badge tone for each.
-export const LOG_CATEGORY_LABELS: Record<LogCategory, string> = {
-  CONSULTATION: 'Consultation',
-  APPLICATION: 'Application',
-  WORKSHOP: 'Workshop',
-  MARKETING: 'Marketing',
-  OPERATIONS: 'Operations',
-  RESEARCH: 'Research',
-  ADMIN: 'Admin',
-  OTHER: 'Other',
+// ---- Work Tracker ---------------------------------------------------------
+// CHECK constraints in Postgres (db/work-tracker.sql), stored lower_snake.
+//
+// Colours map onto the app's existing Badge tones rather than introducing a
+// second palette — see the note in src/pages/WorkTracker.tsx.
+export const TASK_STATUSES = [
+  'not_started',
+  'in_progress',
+  'blocked',
+  'submitted',
+  'approved',
+  'completed',
+] as const;
+
+export const TASK_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  not_started: 'Not started',
+  in_progress: 'In progress',
+  blocked: 'Blocked',
+  submitted: 'Submitted',
+  approved: 'Approved',
+  completed: 'Completed',
 };
 
-export const LOG_STATUS_LABELS: Record<LogStatus, string> = {
-  PLANNED: 'Planned',
-  IN_PROGRESS: 'In progress',
-  DONE: 'Done',
-  BLOCKED: 'Blocked',
-  CARRIED_FORWARD: 'Carried forward',
+/**
+ * Dot colour per status. A dot plus text rather than a filled chip: a chip on
+ * every row of a dense table is noise.
+ */
+export const TASK_STATUS_DOT: Record<TaskStatus, string> = {
+  not_started: 'bg-slate-400',
+  in_progress: 'bg-sky-500',
+  blocked: 'bg-rose-500',
+  submitted: 'bg-amber-500',
+  approved: 'bg-emerald-500',
+  completed: 'bg-emerald-500/60',
 };
 
-export const LOG_STATUS_TONES: Record<LogStatus, string> = {
-  PLANNED: 'gray',
-  IN_PROGRESS: 'amber',
-  DONE: 'green',
-  BLOCKED: 'rose',
-  // Deliberately the same neutral as PLANNED; the chip component dims it, so a
-  // rolled-over task reads as history rather than as today's work.
-  CARRIED_FORWARD: 'gray',
+export const TASK_STATUS_TEXT: Record<TaskStatus, string> = {
+  not_started: 'text-slate-500',
+  in_progress: 'text-sky-700 dark:text-sky-300',
+  blocked: 'text-rose-700 dark:text-rose-300',
+  submitted: 'text-amber-700 dark:text-amber-300',
+  approved: 'text-emerald-700 dark:text-emerald-300',
+  completed: 'text-emerald-700/70 dark:text-emerald-300/70',
 };
 
-export const LOG_PRIORITY_LABELS: Record<LogPriority, string> = {
-  HIGH: 'High',
-  MEDIUM: 'Medium',
-  LOW: 'Low',
+export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
+  critical: 'Critical',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+};
+
+/** Priority is a left border on the row, not another chip. Low gets nothing. */
+export const TASK_PRIORITY_BORDER: Record<TaskPriority, string> = {
+  critical: 'border-l-rose-500',
+  high: 'border-l-amber-500',
+  medium: 'border-l-slate-200 dark:border-l-slate-700',
+  low: 'border-l-transparent',
+};
+
+export const COLLABORATOR_ROLES = ['contributor', 'reviewer'] as const;
+
+export const COLLABORATOR_ROLE_LABELS: Record<CollaboratorRole, string> = {
+  contributor: 'Contributor',
+  reviewer: 'Reviewer',
 };

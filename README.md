@@ -1,6 +1,6 @@
 # MCCIA OS
 
-Internal workspace for the MCCIA Applied AI Studio team: the daily work log,
+Internal workspace for the MCCIA Applied AI Studio team: the work tracker,
 workshops and events, social content, outreach messages and shared resources.
 The team enters everything directly through the app.
 
@@ -55,15 +55,16 @@ everyone on the team. Two separate notions of a person exist:
 
 - The **Assigned to** field on creatives and messages, a plain name drawn from
   the team roster in Settings.
-- The **`users` table**, added for the Daily Work Log and seeded from that same
-  roster (`db/daily-logs.sql`).
+- The **`users` table**, seeded from that same roster (`db/work-tracker.sql`).
+  The Work Tracker's "Viewing" selector doubles as the current user.
 
 Neither is an access boundary — both are labels for coordination. Making
 ownership real would need actual authentication.
 
 ### Key flows
-- **Daily Log** is the landing page (`/` redirects to `/daily`): what each
-  person worked on, what came of it, and who has not reported.
+- **Work Tracker** is the landing page (`/` redirects to `/work-tracker`): what
+  each person is working on, its status, dates, priority, who they report to and
+  who approves it. See [Work Tracker](#work-tracker).
 - **Workshops & Events** records every session run, with auto-numbered codes and
   per-participant attendance. See [Workshops & Events](#workshops--events).
 - **Social / Messages / Templates** — full CRUD through SlideOver drawers;
@@ -72,11 +73,69 @@ ownership real would need actual authentication.
 - **Social** and **Resources** support CSV/Excel bulk import/export.
 
 ### Removed modules
+The **Daily Work Log** was replaced by the Work Tracker. Its tables were
+**renamed, not dropped** — `daily_logs_archive` (17 rows) and
+`daily_checkins_archive` (2 rows) hold the team's real August entries and are
+read-only. `/daily` and `/daily-logs` redirect to `/work-tracker`.
+
 Dashboard, Companies, Consulting, App Development and Analytics were removed.
 Their pages, routes, nav entries, server code (`server/analytics.ts`,
 `server/reports.ts`) and their `Company` / `Session` / `Followup` / `Project`
 sheets are gone from the types, schemas and store allowlist, and their records
 were deleted from the database. `@dnd-kit/core` and `pdfkit` went with them.
+
+## Work Tracker
+
+One screen at `/work-tracker`: a header strip and a single editable table where
+every field is changed in place. Backed by `tasks`, `task_collaborators` and
+`task_activity` in `db/work-tracker.sql`.
+
+**One table for the whole team.** `tasks` is filtered by `assignee_id`; there is
+no table, schema or database per person. The user dropdown is a filter, not a
+database switch — splitting per user would make the team view, the overdue
+report and the workload summary impossible to build.
+
+### Rules
+
+- **Status pipeline:** not started → in progress → blocked → submitted →
+  approved → completed.
+- Moving to `submitted` stamps `completed_at`; moving to `approved` stamps
+  `approved_at`. Moving back out clears them and writes an activity row.
+- **Only the task's approver may set `approved`.** The option renders disabled
+  with a tooltip naming who can, and the API rejects it with `403` — a disabled
+  `<option>` is not a boundary.
+- **`deadline` can never be earlier than `due_date`**, enforced in the form, in
+  the API against the merged row, and as a CHECK constraint.
+- `is_overdue`, `days_left` and `at_risk` are **computed per query, never
+  stored**, so they cannot go stale.
+- Every status, assignee or date change appends to `task_activity`.
+- Refs (`WT-0001`) come from a database trigger over a sequence.
+
+### Editing
+
+Click a cell and change it. Dropdowns and dates save on change, text on blur or
+Enter, Escape reverts. Updates are optimistic: the value paints immediately, and
+a failure rolls back that one cell and shows the error beneath it rather than
+failing the page. The toolbar shows "Saving…" then "Saved 2s ago" — no toasts,
+which get unbearable across twenty edits. Tab moves to the next cell, arrows
+move the focused cell.
+
+Text cells never fire a request per keystroke, so the 400ms debounce the spec
+asks for is not needed — commit happens on blur or Enter.
+
+### Identity
+
+There is no login. The person selected in the header's **Viewing** block is
+treated as the current user: it gates the "Assigned to me" tab and the approve
+permission, and pre-fills `allocated_by` on a new row. It is passed to the API
+as `?actor=`. **This is a label, not authentication** — a caller can name
+anyone. Real enforcement needs the auth described above.
+
+### Sample data
+
+`node scripts/seed-work-tracker.mjs` adds 10 sample tasks spanning every status,
+two of them shared. `--clear` removes them again. Only tasks are invented: real
+people are never given invented emails or designations.
 
 ## Workshops & Events
 
@@ -169,18 +228,18 @@ src/
   lib/           api client, csv, theme, utils, query client
   hooks/         useSheet generic + per-module hooks
   components/    AppLayout, SlideOver, Toast, ui/ primitives, FormControls
-  pages/         Daily* (4), Events*, Social, Resources, Messages, Templates, Settings
+  pages/         WorkTracker, Events*, Social, Resources, Messages, Templates, Settings
 server/          store (file/Postgres), runtime-agnostic handlers, Vite plugin,
-                 events + daily-logs (dedicated-table data access)
+                 events + work-tracker (dedicated-table data access)
 api/             Vercel function wrapper
 db/              production SQL schema + one-time migrations,
-                 events + daily-logs schemas
+                 events + work-tracker schemas
 ```
 
 ## Deploying to Neon + Vercel
 1. Run `db/migrations.sql` against your Neon database, then `db/events.sql`
-   and `db/daily-logs.sql` (both additive and idempotent — they only create
-   their own tables; `daily-logs.sql` reads `records` once, to seed the team
+   and `db/work-tracker.sql` (both additive and idempotent — they only create
+   their own tables; `work-tracker.sql` reads `records` once, to seed the team
    roster from Settings, and never writes to it).
 2. Set `DATABASE_URL` as a Vercel environment variable (the same pooled Neon
    connection string used locally). `server/store.ts` picks up Postgres
