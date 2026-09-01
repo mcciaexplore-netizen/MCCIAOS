@@ -109,11 +109,30 @@ function stickyOffsets(visible: (k: ColumnKey) => boolean): Partial<Record<Colum
 }
 const COLUMN_PREF_KEY = 'mccia.tracker.columns';
 
+// Everyone adds their own work daily, so landing on "All team" and making them
+// pick themselves first is a step repeated every day. The last person chosen is
+// remembered and reapplied. A pasted ?assignee= link still wins, because the
+// URL is read first. Empty means All team, which is remembered as a deliberate
+// choice rather than treated as "nothing stored".
+const PERSON_PREF_KEY = 'mccia.tracker.person';
+
+function readStoredPerson(): string | null {
+  try {
+    return localStorage.getItem(PERSON_PREF_KEY);
+  } catch {
+    return null; // private mode
+  }
+}
+
 /** Everything that scopes the view lives in the URL, so a view is shareable. */
 function useTrackerParams() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') ?? 'all') as TabKey;
-  const assignee = params.get('assignee') ?? '';
+  // `has` rather than `get`: ?assignee= (deliberately blank) must mean All team
+  // and not fall through to the remembered person.
+  const assignee = params.has('assignee')
+    ? (params.get('assignee') ?? '')
+    : (readStoredPerson() ?? '');
   const status = params.get('status') ?? '';
   const priority = params.get('priority') ?? '';
 
@@ -129,11 +148,11 @@ function useTrackerParams() {
     [params, setParams],
   );
 
-  return { tab, assignee, status, priority, set };
+  return { tab, assignee, status, priority, set, urlHasAssignee: params.has('assignee') };
 }
 
 export default function WorkTracker() {
-  const { tab, assignee, status, priority, set } = useTrackerParams();
+  const { tab, assignee, status, priority, set, urlHasAssignee } = useTrackerParams();
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -141,6 +160,17 @@ export default function WorkTracker() {
   // user, since there is no session. It gates the Assigned to me tab and the
   // approve permission. A label, never a security boundary.
   const actor = assignee || undefined;
+
+  // Remember whoever is selected, and reflect a remembered person back into the
+  // URL so the view stays shareable and a refresh keeps it.
+  useEffect(() => {
+    try {
+      localStorage.setItem(PERSON_PREF_KEY, assignee);
+    } catch {
+      /* private mode; the preference just will not persist */
+    }
+    if (!urlHasAssignee && assignee) set({ assignee });
+  }, [assignee, urlHasAssignee, set]);
 
   const usersQuery = useQuery({ queryKey: ['tracker-users'], queryFn: () => trackerApi.users() });
   const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
@@ -1020,7 +1050,10 @@ function TaskRow({
         <td>
           <EditableDate
             value={task.dueDate}
-            overdue={task.isOverdue}
+            // Red here only when there is no deadline, because then the due
+            // date is the hard limit. Otherwise a slipped target is amber.
+            overdue={task.isOverdue && !task.deadline}
+            slipped={task.hasSlipped}
             ariaLabel={`Due date of ${task.ref}`}
             onSave={(v) => onSave(task.id, 'dueDate', v)}
             {...cell('dueDate')}
@@ -1033,6 +1066,7 @@ function TaskRow({
           <EditableDate
             value={task.deadline}
             min={task.dueDate ?? undefined}
+            overdue={task.isOverdue && Boolean(task.deadline)}
             ariaLabel={`Deadline of ${task.ref}`}
             onSave={(v) => onSave(task.id, 'deadline', v)}
             {...cell('deadline')}
@@ -1349,13 +1383,29 @@ function MobileCard({
       <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
         <div>
           <dt className="text-slate-400">Due</dt>
-          <dd className={cn('tabular-nums', task.isOverdue ? 'text-rose-600' : 'text-slate-600 dark:text-slate-300')}>
+          <dd
+            className={cn(
+              'tabular-nums',
+              task.isOverdue && !task.deadline
+                ? 'text-rose-600'
+                : task.hasSlipped
+                  ? 'text-amber-600'
+                  : 'text-slate-600 dark:text-slate-300',
+            )}
+          >
             {task.dueDate ? formatDate(task.dueDate) : '—'}
           </dd>
         </div>
         <div>
           <dt className="text-slate-400">Deadline</dt>
-          <dd className="tabular-nums text-slate-600 dark:text-slate-300">
+          <dd
+            className={cn(
+              'tabular-nums',
+              task.isOverdue && task.deadline
+                ? 'text-rose-600'
+                : 'text-slate-600 dark:text-slate-300',
+            )}
+          >
             {task.deadline ? formatDate(task.deadline) : '—'}
           </dd>
         </div>

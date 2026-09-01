@@ -257,8 +257,14 @@ export interface Task {
   collaborators: TaskCollaborator[];
 
   // ---- Derived, computed per request; never stored -------------------------
-  /** due_date < today and not yet approved or completed. */
+  /**
+   * Late: the deadline has passed (or the due date, when no deadline is set)
+   * and the task is not approved or completed. The working target slipping is
+   * not enough — see LATE_DATE in server/work-tracker.ts.
+   */
   isOverdue: boolean;
+  /** Past the working target but still inside the deadline. */
+  hasSlipped: boolean;
   /** Whole days until due_date; negative when past. Null with no due date. */
   daysLeft: number | null;
   /** Due within two days and not yet started, or blocked. */

@@ -54,6 +54,18 @@ const blank = (v: unknown): string | null => {
 /** The IST calendar day, as SQL. Used for every "today" comparison. */
 const TODAY = `(now() at time zone 'Asia/Kolkata')::date`;
 
+/**
+ * The date that decides whether work is late.
+ *
+ * `due_date` is the working target and `deadline` is the hard limit, so missing
+ * the target is not yet a failure — only blowing the deadline is. A row with no
+ * deadline falls back to its due date, otherwise it could never be late at all.
+ *
+ * The CHECK constraint keeps deadline >= due_date, so this is also exactly the
+ * point at which *both* dates have passed.
+ */
+const LATE_DATE = `coalesce(t.deadline, t.due_date)`;
+
 // ---- Row shapes ------------------------------------------------------------
 
 interface TaskRow {
@@ -80,6 +92,7 @@ interface TaskRow {
   created_at: string | Date;
   updated_at: string | Date;
   is_overdue: boolean;
+  has_slipped: boolean;
   days_left: number | null;
   at_risk: boolean;
   collaborators: TaskCollaborator[] | null;
@@ -101,9 +114,15 @@ const TASK_COLUMNS = `
   to_char(t.due_date, 'YYYY-MM-DD') as due_date,
   to_char(t.deadline, 'YYYY-MM-DD') as deadline,
   t.completed_at, t.approved_at, t.created_at, t.updated_at,
+  (${LATE_DATE} is not null
+    and ${LATE_DATE} < ${TODAY}
+    and t.status not in ('approved','completed'))            as is_overdue,
+  -- Past the working target but still inside the deadline. Without this the
+  -- stricter overdue rule would leave a slipped target with no signal at all.
   (t.due_date is not null
     and t.due_date < ${TODAY}
-    and t.status not in ('approved','completed'))            as is_overdue,
+    and (${LATE_DATE} is null or ${LATE_DATE} >= ${TODAY})
+    and t.status not in ('approved','completed'))            as has_slipped,
   (t.due_date - ${TODAY})                                     as days_left,
   (t.due_date is not null
     and (t.due_date - ${TODAY}) between 0 and 2
@@ -160,6 +179,7 @@ function toTask(row: TaskRow): Task {
       allocatedAt: iso(c.allocatedAt as unknown as string) as string,
     })),
     isOverdue: Boolean(row.is_overdue),
+    hasSlipped: Boolean(row.has_slipped),
     daysLeft: row.days_left == null ? null : Number(row.days_left),
     atRisk: Boolean(row.at_risk),
   };
@@ -235,7 +255,7 @@ function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
   if (f.priority) conditions.push(`t.priority = ${bind(f.priority)}`);
   if (f.overdue) {
     conditions.push(
-      `t.due_date is not null and t.due_date < ${TODAY}
+      `${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
        and t.status not in ('approved','completed')`,
     );
   }
@@ -256,7 +276,7 @@ function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
       break;
     case 'overdue':
       conditions.push(
-        `t.due_date is not null and t.due_date < ${TODAY}
+        `${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
          and t.status not in ('approved','completed')`,
       );
       break;
@@ -352,7 +372,8 @@ export async function getTabCounts(assignee?: string | null): Promise<TaskTabCou
        count(*) filter (where due_date is not null
                           and (due_date - ${TODAY}) between 0 and 3
                           and status not in ('approved','completed'))::int as due_soon,
-       count(*) filter (where due_date is not null and due_date < ${TODAY}
+       count(*) filter (where coalesce(deadline, due_date) is not null
+                          and coalesce(deadline, due_date) < ${TODAY}
                           and status not in ('approved','completed'))::int as overdue,
        count(*) filter (where status in ('approved','completed'))::int as completed
      from scoped`,
@@ -378,7 +399,8 @@ export async function getToday(assignee?: string | null): Promise<TodayCounts> {
        to_char(${TODAY}, 'YYYY-MM-DD') as date,
        count(*) filter (where due_date = ${TODAY}
                           and status not in ('approved','completed'))::int as due_today,
-       count(*) filter (where due_date is not null and due_date < ${TODAY}
+       count(*) filter (where coalesce(deadline, due_date) is not null
+                          and coalesce(deadline, due_date) < ${TODAY}
                           and status not in ('approved','completed'))::int as overdue,
        count(*) filter (where (completed_at at time zone 'Asia/Kolkata')::date = ${TODAY})::int
          as completed_today

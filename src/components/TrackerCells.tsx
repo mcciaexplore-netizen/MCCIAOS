@@ -372,12 +372,16 @@ export function EditableDate({
   disabled,
   min,
   overdue,
+  slipped,
   ariaLabel,
 }: CellProps & {
   value: string | null;
   onSave: (next: string | null) => void;
   min?: string;
+  /** The date that made this task late. Red. */
   overdue?: boolean;
+  /** Working target passed, deadline still ahead. Amber, not red. */
+  slipped?: boolean;
   ariaLabel: string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -421,7 +425,9 @@ export function EditableDate({
         onKeyDown={(e) => {
           if (e.key === 'Enter') setEditing(true);
         }}
-        style={{ color: overdue ? 'var(--r400)' : 'var(--n200)' }}
+        style={{
+          color: overdue ? 'var(--r400)' : slipped ? 'var(--y400)' : 'var(--n200)',
+        }}
         className={cn(cellBase, 'tabular-nums')}
       >
         {value ? formatJiraDate(value) : '—'}
