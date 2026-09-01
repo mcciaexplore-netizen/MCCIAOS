@@ -1,19 +1,9 @@
 import { useSheet } from './useSheet';
-import type {
-  Company,
-  Message,
-  Template,
-  Creative,
-  Followup,
-  Project,
-  Resource,
-  Session,
-} from '@/types';
+import type { Message, Template, Creative, Resource } from '@/types';
 
-export const useCompanies = () => useSheet<Company>('Company');
-export const useSessions = () => useSheet<Session>('Session');
-export const useFollowups = () => useSheet<Followup>('Followup');
-export const useProjects = () => useSheet<Project>('Project');
+// useCompanies / useSessions / useFollowups / useProjects were removed along
+// with the Companies, Consulting and App Development pages. Their sheets are
+// gone from the store allowlist, so nothing can read them any more.
 export const useCreatives = () => useSheet<Creative>('Creative');
 export const useResources = () => useSheet<Resource>('Resource');
 export const useMessages = () => useSheet<Message>('Message');

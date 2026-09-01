@@ -13,13 +13,7 @@ type StoredSettings = AppSettings & { id: string };
 
 export interface SettingsValue extends AppSettings {
   // Derived views the pages consume directly.
-  projectStageValues: string[];
-  companyStatusValues: string[];
-  sessionStatusValues: string[];
   creativeStatusValues: string[];
-  projectStageTone: Record<string, string>;
-  companyStatusTone: Record<string, string>;
-  sessionStatusTone: Record<string, string>;
   creativeStatusTone: Record<string, string>;
   isLoading: boolean;
 }
@@ -44,13 +38,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const s: AppSettings = { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
     return {
       ...s,
-      projectStageValues: labelsOf(s.projectStages),
-      companyStatusValues: labelsOf(s.companyStatuses),
-      sessionStatusValues: labelsOf(s.sessionStatuses),
       creativeStatusValues: labelsOf(s.creativeStatuses),
-      projectStageTone: toneMapOf(s.projectStages),
-      companyStatusTone: toneMapOf(s.companyStatuses),
-      sessionStatusTone: toneMapOf(s.sessionStatuses),
       creativeStatusTone: toneMapOf(s.creativeStatuses),
       isLoading,
     };

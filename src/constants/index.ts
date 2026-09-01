@@ -26,16 +26,6 @@ export const BADGE_TONES = [
 // not by importing from here.
 export const DEFAULT_SETTINGS: AppSettings = {
   teamMembers: ['Ismail', 'Ziya', 'Sujal', 'Pratik', 'Taniya', 'Rutuja'],
-  leadSources: [
-    'Workshop',
-    'WhatsApp',
-    'Referral',
-    'Social',
-    'Website',
-    'Other',
-  ],
-  businessScales: ['Micro', 'Small', 'Medium'],
-  membershipStatuses: ['Member', 'Non-Member', 'Pending'],
   resourceCategories: ['Sheet', 'Dashboard', 'Automation', 'Docs', 'Other'],
   creativePlatforms: [
     'WhatsApp',
@@ -44,23 +34,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
     'Daily Email',
     'Weekly Email',
     'Monthly Email',
-  ],
-  projectStages: [
-    { label: 'Pre Dev', tone: 'gray' },
-    { label: 'Started', tone: 'blue' },
-    { label: 'Completed', tone: 'violet' },
-    { label: 'Deployed', tone: 'amber' },
-    { label: 'Using', tone: 'green' },
-  ],
-  companyStatuses: [
-    { label: 'New Lead', tone: 'amber' },
-    { label: 'Contacted', tone: 'blue' },
-    { label: 'Active', tone: 'green' },
-  ],
-  sessionStatuses: [
-    { label: 'Pending', tone: 'amber' },
-    { label: 'In Progress', tone: 'blue' },
-    { label: 'Completed', tone: 'green' },
   ],
   creativeStatuses: [
     { label: 'draft', tone: 'gray' },

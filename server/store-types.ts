@@ -2,10 +2,6 @@
 // in from server/store.ts, so server/handlers.ts never knows which is active.
 
 export type SheetName =
-  | 'Company'
-  | 'Session'
-  | 'Followup'
-  | 'Project'
   | 'Creative'
   | 'Resource'
   | 'Message'
@@ -13,10 +9,6 @@ export type SheetName =
   | 'Settings';
 
 export const SHEET_ALLOWLIST: SheetName[] = [
-  'Company',
-  'Session',
-  'Followup',
-  'Project',
   'Creative',
   'Resource',
   'Message',

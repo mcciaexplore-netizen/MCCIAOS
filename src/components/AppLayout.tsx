@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Bell, Moon, Sun, Menu, X, SlidersHorizontal } from 'lucide-react';
+import { Moon, Sun, Menu, X, SlidersHorizontal } from 'lucide-react';
 import { NAV_ITEMS } from './navigation';
 import { useTheme } from '@/lib/theme';
-import { useFollowups } from '@/hooks';
-import { cn, daysUntil } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { APP_NAME, APP_TAGLINE, LOGO_SRC } from '@/lib/brand';
 
 function Brand() {
@@ -79,54 +78,6 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function NotificationBell() {
-  const { items } = useFollowups();
-  const [open, setOpen] = useState(false);
-  const due = items.filter((f) => {
-    if (f.done) return false;
-    const d = daysUntil(f.dueDate);
-    return d !== null && d <= 3;
-  });
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-      >
-        <Bell className="h-5 w-5" />
-        {due.length > 0 && (
-          <span className="absolute right-1.5 top-1.5 flex h-2 w-2 rounded-full bg-rose-500" />
-        )}
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-slate-200 bg-white py-2 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-            <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Follow-ups due soon
-            </p>
-            {due.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-slate-400">Nothing due. </p>
-            ) : (
-              due.slice(0, 6).map((f) => (
-                <div
-                  key={f.id}
-                  className="px-3 py-2 text-sm text-slate-600 dark:text-slate-300"
-                >
-                  <span className="font-medium">{f.note || 'Follow-up'}</span>
-                  <span className="ml-1 text-xs text-slate-400">
-                    · {daysUntil(f.dueDate) === 0 ? 'today' : `${daysUntil(f.dueDate)}d`}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 export function AppLayout() {
   const { theme, toggle } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -134,11 +85,11 @@ export function AppLayout() {
   const current = NAV_ITEMS.find(
     (n) => n.to === location.pathname || (n.to !== '/' && location.pathname.startsWith(n.to)),
   );
-  // Settings is no longer in NAV_ITEMS, so the header title needs it named
-  // here — otherwise /settings would fall through to "Dashboard".
+  // Settings is not in NAV_ITEMS, so the header title needs it named here.
+  // Everything else falls back to Daily Log, which is where "/" redirects.
   const title = location.pathname.startsWith('/settings')
     ? 'Settings'
-    : (current?.label ?? 'Dashboard');
+    : (current?.label ?? 'Daily Log');
 
   return (
     <div className="flex h-full">
@@ -199,7 +150,6 @@ export function AppLayout() {
                 <Moon className="h-5 w-5" />
               )}
             </button>
-            <NotificationBell />
           </div>
         </header>
 

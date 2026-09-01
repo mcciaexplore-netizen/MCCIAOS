@@ -9,64 +9,6 @@ const vocab = (message: string) => z.string().min(1, message);
 
 // Only the four contact fields are required — everything else can be filled
 // in later, so a company can be captured from the Kanban quick-add.
-export const companySchema = z.object({
-  companyName: z.string().min(1, 'Company name is required'),
-  contactName: z.string().min(1, 'Name is required'),
-  contactEmail: z.string().email('Enter a valid email'),
-  contactPhone: z.string().min(6, 'Enter a valid phone number'),
-  contactRole: z.string().optional(),
-  udyamNumber: z.string().optional(),
-  district: z.string().optional(),
-  industry: z.string().optional(),
-  membershipStatus: z.string().optional(),
-  rampScheme: z.boolean().optional(),
-  leadSource: z.string().optional(),
-  businessScale: z.string().optional(),
-  status: vocab('Status is required').default(DEFAULT_SETTINGS.companyStatuses[0].label),
-  assignedTo: z.string().nullable().optional(),
-});
-
-// Kanban quick-add: the minimum needed to create a company record.
-export const companyQuickSchema = companySchema.pick({
-  companyName: true,
-  contactName: true,
-  contactEmail: true,
-  contactPhone: true,
-});
-
-export const sessionSchema = z.object({
-  companyId: z.string().min(1, 'Link a company'),
-  query: z.string().min(1, 'Describe the query'),
-  solution: z.string().optional(),
-  consultant: z.string().optional(),
-  mode: z.string().optional(),
-  payment: z.string().optional(),
-  domain: z.string().optional(),
-  outcome: z.string().optional(),
-  status: vocab('Status is required').default(DEFAULT_SETTINGS.sessionStatuses[0].label),
-  assignedTo: z.string().nullable().optional(),
-});
-
-export const followupSchema = z.object({
-  sessionId: z.string().min(1),
-  dueDate: z.string().min(1, 'Pick a due date'),
-  note: z.string().optional(),
-  done: z.boolean().default(false),
-  assignedTo: z.string().nullable().optional(),
-});
-
-export const projectSchema = z.object({
-  companyId: z.string().min(1, 'Link a company'),
-  title: z.string().optional(),
-  stage: vocab('Stage is required').default(DEFAULT_SETTINGS.projectStages[0].label),
-  progressPct: z.coerce.number().min(0).max(100).default(0),
-  repoUrl: z.string().url('Enter a valid URL').optional().or(z.literal('')),
-  liveUrl: z.string().url('Enter a valid URL').optional().or(z.literal('')),
-  nextAction: z.string().optional(),
-  blocker: z.string().optional(),
-  assignedTo: z.string().nullable().optional(),
-});
-
 export const creativeSchema = z.object({
   companyId: z.string().optional().or(z.literal('')),
   platform: vocab('Platform is required'),
@@ -151,31 +93,15 @@ const tonedList = (label: string) =>
 
 export const settingsSchema = z.object({
   teamMembers: nameList('team member').default(DEFAULT_SETTINGS.teamMembers),
-  leadSources: nameList('lead source').default(DEFAULT_SETTINGS.leadSources),
-  businessScales: nameList('business scale').default(DEFAULT_SETTINGS.businessScales),
-  membershipStatuses: nameList('membership status').default(
-    DEFAULT_SETTINGS.membershipStatuses,
-  ),
   resourceCategories: nameList('resource category').default(
     DEFAULT_SETTINGS.resourceCategories,
   ),
   creativePlatforms: nameList('platform').default(DEFAULT_SETTINGS.creativePlatforms),
-  projectStages: tonedList('Kanban stage').default(DEFAULT_SETTINGS.projectStages),
-  companyStatuses: tonedList('company status').default(
-    DEFAULT_SETTINGS.companyStatuses,
-  ),
-  sessionStatuses: tonedList('session status').default(
-    DEFAULT_SETTINGS.sessionStatuses,
-  ),
   creativeStatuses: tonedList('creative status').default(
     DEFAULT_SETTINGS.creativeStatuses,
   ),
 });
 
-export type CompanyInput = z.infer<typeof companySchema>;
-export type CompanyQuickInput = z.infer<typeof companyQuickSchema>;
-export type SessionInput = z.infer<typeof sessionSchema>;
-export type ProjectInput = z.infer<typeof projectSchema>;
 export type CreativeInput = z.infer<typeof creativeSchema>;
 export type ResourceInput = z.infer<typeof resourceSchema>;
 export type MessageInput = z.infer<typeof messageSchema>;
@@ -195,56 +121,6 @@ const anyText = z.string().optional();
 // Vocabulary fields keep their default so a blank cell still lands on a value
 // the filters and badges can render.
 const anyVocab = (fallback: string) => z.string().default(fallback);
-
-export const companyImportSchema = z.object({
-  companyName: anyText,
-  contactName: anyText,
-  contactEmail: anyText,
-  contactPhone: anyText,
-  contactRole: anyText,
-  udyamNumber: anyText,
-  district: anyText,
-  industry: anyText,
-  membershipStatus: anyText,
-  rampScheme: z.boolean().optional(),
-  leadSource: anyText,
-  businessScale: anyText,
-  status: anyVocab(DEFAULT_SETTINGS.companyStatuses[0].label),
-  assignedTo: z.string().nullable().optional(),
-});
-
-export const sessionImportSchema = z.object({
-  companyId: anyText,
-  query: anyText,
-  solution: anyText,
-  consultant: anyText,
-  mode: anyText,
-  payment: anyText,
-  domain: anyText,
-  outcome: anyText,
-  status: anyVocab(DEFAULT_SETTINGS.sessionStatuses[0].label),
-  assignedTo: z.string().nullable().optional(),
-});
-
-export const followupImportSchema = z.object({
-  sessionId: anyText,
-  dueDate: anyText,
-  note: anyText,
-  done: z.boolean().default(false),
-  assignedTo: z.string().nullable().optional(),
-});
-
-export const projectImportSchema = z.object({
-  companyId: anyText,
-  title: anyText,
-  stage: anyVocab(DEFAULT_SETTINGS.projectStages[0].label),
-  progressPct: z.coerce.number().min(0).max(100).catch(0).default(0),
-  repoUrl: anyText,
-  liveUrl: anyText,
-  nextAction: anyText,
-  blocker: anyText,
-  assignedTo: z.string().nullable().optional(),
-});
 
 export const creativeImportSchema = z.object({
   companyId: anyText,
@@ -293,10 +169,6 @@ export const resourceImportSchema = z.object({
 
 /** Lenient lookup used by /api/bulk and the import preview. */
 export const importSchemaForSheet: Record<SheetName, z.ZodTypeAny> = {
-  Company: companyImportSchema,
-  Session: sessionImportSchema,
-  Followup: followupImportSchema,
-  Project: projectImportSchema,
   Creative: creativeImportSchema,
   Resource: resourceImportSchema,
   Message: messageImportSchema,
@@ -307,10 +179,6 @@ export const importSchemaForSheet: Record<SheetName, z.ZodTypeAny> = {
 
 // Server-side validation lookup by sheet name.
 export const schemaForSheet: Record<SheetName, z.ZodTypeAny> = {
-  Company: companySchema,
-  Session: sessionSchema,
-  Followup: followupSchema,
-  Project: projectSchema,
   Creative: creativeSchema,
   Resource: resourceSchema,
   Message: messageSchema,

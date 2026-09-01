@@ -28,7 +28,7 @@ import {
 } from '@/components/ui';
 import { AssigneeSelect } from '@/components/FormControls';
 import { useToast } from '@/components/Toast';
-import { TimeBars, type Point } from '@/components/charts';
+import { TimeBars, type ChartTone, type Point } from '@/components/charts';
 import { useMessages, useTemplates } from '@/hooks';
 import { MESSAGE_STATUSES } from '@/schemas';
 import type { Message, MessageChannel, MessageKind, MessageStatus } from '@/types';
@@ -168,13 +168,13 @@ export default function Messages() {
           title="WhatsApp"
           icon={<MessageCircle className="h-4 w-4" />}
           messages={whatsapp}
-          series="consultations"
+          tone="primary"
         />
         <VolumeCard
           title="Email"
           icon={<Mail className="h-4 w-4" />}
           messages={email}
-          series="setups"
+          tone="accent"
         />
       </div>
 
@@ -349,12 +349,12 @@ function VolumeCard({
   title,
   icon,
   messages,
-  series,
+  tone,
 }: {
   title: string;
   icon: React.ReactNode;
   messages: Message[];
-  series: 'consultations' | 'setups';
+  tone: ChartTone;
 }) {
   const points = useMemo(() => dailySeries(messages), [messages]);
   const sent = messages.filter((m) => m.status === 'sent').length;
@@ -381,7 +381,7 @@ function VolumeCard({
           No {title} messages in the last 30 days
         </p>
       ) : (
-        <TimeBars points={points} series={series} />
+        <TimeBars points={points} tone={tone} />
       )}
     </Card>
   );

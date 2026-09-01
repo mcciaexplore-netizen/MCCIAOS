@@ -39,17 +39,6 @@ import {
   upsertCheckin,
 } from './daily-logs.js';
 import {
-  DIMENSIONS,
-  GRANULARITIES,
-  METRICS,
-  PERIODS,
-  getActivity,
-  getBreakdown,
-  getCapacity,
-  getSummary,
-  getTimeseries,
-} from './analytics.js';
-import {
   EventError,
   addParticipant,
   createEvent,
@@ -65,7 +54,6 @@ import {
   updateParticipant,
   type ParticipantWriteInput,
 } from './events.js';
-import { buildReport } from './reports.js';
 import { NO_SQL_MESSAGE, hasSql } from './sql.js';
 import {
   describeStore,
@@ -101,6 +89,35 @@ export interface ApiResponse {
 }
 
 const json = (status: number, body: unknown): ApiResponse => ({ status, body });
+
+/** Postgres undefined_table — the module's migration has not been run. */
+const UNDEFINED_TABLE = '42P01';
+
+/**
+ * Last-resort handler for a module backed by its own tables.
+ *
+ * A missing table is a deployment step that has not been done, not a bug, and
+ * naming it is the difference between "Something went wrong" and knowing which
+ * file to run. This follows the reasoning already written into
+ * api/[...path].ts: the failures this internal tool actually hits are
+ * configuration ones, and a generic string leaves whoever is on call with
+ * nothing to act on.
+ *
+ * Everything else stays opaque on purpose — a raw Postgres error names tables,
+ * columns and constraints, which is nothing the client should see.
+ */
+function moduleFailure(err: unknown, label: string, migration: string): ApiResponse {
+  if ((err as { code?: string }).code === UNDEFINED_TABLE) {
+    // eslint-disable-next-line no-console
+    console.error(`[${label}] missing tables — run ${migration}`, err);
+    return json(503, {
+      error: `The ${label} tables have not been created yet. Run ${migration} against the database, then reload.`,
+    });
+  }
+  // eslint-disable-next-line no-console
+  console.error(`[${label}] error`, err);
+  return json(500, { error: 'Something went wrong handling that request' });
+}
 
 function toEntity(row: {
   id: string;
@@ -248,19 +265,6 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     return json(200, { created: created.length, errors });
   }
 
-  // ---- /api/analytics ----------------------------------------------------
-  // ACCESS CONTROL: this app has no authentication and no roles — identity is
-  // whatever the client puts in x-user-name, and every route is already
-  // unauthenticated (see /api/me above). There is therefore nothing to scope
-  // results by, and these endpoints are exactly as open as /api/records
-  // already is. Adding real auth is a separate piece of work; scoping
-  // analytics alone would be security theatre while the raw records API
-  // remains public.
-  if (pathname.startsWith('/api/analytics/')) {
-    if (method !== 'GET') return json(405, { error: 'Method not allowed' });
-    return handleAnalytics(pathname, req.query);
-  }
-
   // ---- /api/events, /api/participants ------------------------------------
   // Same access position as everything above: unauthenticated, because the app
   // has no identity to scope by (see the note on /api/analytics).
@@ -294,104 +298,6 @@ function pickEnum<T extends string>(
 ): T | null {
   if (!raw) return fallback;
   return (allowed as readonly string[]).includes(raw) ? (raw as T) : null;
-}
-
-async function handleAnalytics(
-  pathname: string,
-  query: URLSearchParams,
-): Promise<ApiResponse> {
-  if (!hasSql) return json(503, { error: NO_SQL_MESSAGE });
-
-  const period = pickEnum(query.get('period'), PERIODS, 'month');
-  if (!period) {
-    return json(400, { error: `period must be one of ${PERIODS.join(', ')}` });
-  }
-  const periodInput = {
-    period,
-    from: query.get('from'),
-    to: query.get('to'),
-  };
-
-  try {
-    switch (pathname) {
-      case '/api/analytics/summary':
-        return json(200, await getSummary(periodInput));
-
-      case '/api/analytics/timeseries': {
-        const metric = pickEnum(query.get('metric'), METRICS, 'consultations');
-        const granularity = pickEnum(query.get('granularity'), GRANULARITIES, 'day');
-        if (!metric || !granularity) {
-          return json(400, {
-            error: `metric must be one of ${METRICS.join(', ')}; granularity one of ${GRANULARITIES.join(', ')}`,
-          });
-        }
-        // Bucket counts follow the brief: 30 days, 12 weeks, 12 months.
-        const buckets = granularity === 'day' ? 30 : 12;
-        return json(200, {
-          metric,
-          granularity,
-          points: await getTimeseries(metric, granularity, buckets),
-        });
-      }
-
-      case '/api/analytics/breakdown': {
-        const metric = pickEnum(query.get('metric'), METRICS, 'consultations');
-        const dimension = pickEnum(query.get('dimension'), DIMENSIONS, 'status');
-        if (!metric || !dimension) {
-          return json(400, {
-            error: `metric must be one of ${METRICS.join(', ')}; dimension one of ${DIMENSIONS.join(', ')}`,
-          });
-        }
-        return json(200, {
-          metric,
-          dimension,
-          rows: await getBreakdown(metric, dimension, periodInput),
-        });
-      }
-
-      // Not in the original endpoint list, but the activity table on the page
-      // needs its own paging and cannot ride along with the summary.
-      case '/api/analytics/capacity':
-        return json(200, { rows: await getCapacity(periodInput) });
-
-      case '/api/analytics/activity': {
-        const limit = Math.min(Number(query.get('limit') ?? 20) || 20, 200);
-        const offset = Math.max(Number(query.get('offset') ?? 0) || 0, 0);
-        return json(200, await getActivity(periodInput, limit, offset));
-      }
-
-      case '/api/analytics/export': {
-        const format = pickEnum(
-          query.get('format'),
-          ['csv', 'xlsx', 'pdf'] as const,
-          'csv',
-        );
-        if (!format) return json(400, { error: 'format must be csv, xlsx or pdf' });
-        const file = await buildReport(format, periodInput);
-        return {
-          status: 200,
-          binary: true,
-          body: file.bytes,
-          headers: {
-            'Content-Type': file.contentType,
-            'Content-Disposition': `attachment; filename="${file.filename}"`,
-            'Content-Length': String(file.bytes.byteLength),
-            'Cache-Control': 'no-store',
-          },
-        };
-      }
-
-      default:
-        return json(404, { error: 'Not found' });
-    }
-  } catch (err) {
-    // Bad custom ranges surface here as plain Errors; they are the caller's
-    // fault, not a server fault, so answer 400 rather than letting the
-    // outer handler turn them into a 500.
-    const message = (err as Error).message || 'Analytics query failed';
-    const isInput = /from|to|YYYY-MM-DD|custom period/i.test(message);
-    return json(isInput ? 400 : 500, { error: message });
-  }
 }
 
 // ---- Workshops & Events ----------------------------------------------------
@@ -669,11 +575,7 @@ async function handleEvents(req: ApiRequest): Promise<ApiResponse> {
   } catch (err) {
     // EventError is a fault the caller can fix and carries its own status.
     if (err instanceof EventError) return json(err.status, { error: err.message });
-    // Anything else is ours. Log the detail, return none of it — a Postgres
-    // error message names tables, columns and constraints.
-    // eslint-disable-next-line no-console
-    console.error('[events] error', err);
-    return json(500, { error: 'Something went wrong handling that request' });
+    return moduleFailure(err, 'Workshops & Events', 'db/events.sql');
   }
 }
 
@@ -910,9 +812,7 @@ async function handleDailyLogs(req: ApiRequest): Promise<ApiResponse> {
     return json(404, { error: 'Not found' });
   } catch (err) {
     if (err instanceof DailyError) return json(err.status, { error: err.message });
-    // eslint-disable-next-line no-console
-    console.error('[daily-logs] error', err);
-    return json(500, { error: 'Something went wrong handling that request' });
+    return moduleFailure(err, 'Daily Work Log', 'db/daily-logs.sql');
   }
 }
 

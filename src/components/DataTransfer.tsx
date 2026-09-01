@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 import { Badge, Button, Modal, Select } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { useCompanies } from '@/hooks';
 import { api } from '@/lib/api';
 import { importSchemaForSheet } from '@/schemas';
 import { useSettings } from '@/settings/SettingsContext';
@@ -601,40 +600,22 @@ function formatCell(value: unknown): string {
 }
 
 /**
- * Vocabularies and reference lookups the coercion step needs. Companies are
- * indexed by normalised name so "acme traders" resolves to "Acme Traders".
+ * Vocabularies the coercion step needs. The company lookup that used to live
+ * here went with the Companies module: no surviving column references another
+ * record by name.
  */
 function useTransferContext(): TransferContext {
   const settings = useSettings();
-  const { items: companies } = useCompanies();
 
-  return useMemo(() => {
-    const byId = new Map(companies.map((c) => [c.id, c.companyName]));
-    const byName = new Map(
-      companies.map((c) => [c.companyName.trim().toLowerCase(), c.id]),
-    );
-
-    return {
+  return useMemo(
+    () => ({
       vocab: {
         teamMembers: settings.teamMembers,
-        leadSources: settings.leadSources,
-        businessScales: settings.businessScales,
-        membershipStatuses: settings.membershipStatuses,
         resourceCategories: settings.resourceCategories,
         creativePlatforms: settings.creativePlatforms,
-        projectStageValues: settings.projectStageValues,
-        companyStatusValues: settings.companyStatusValues,
-        sessionStatusValues: settings.sessionStatusValues,
         creativeStatusValues: settings.creativeStatusValues,
       },
-      refs: {
-        Company: {
-          label: (id) => byId.get(id),
-          // An exported file round-trips ids, so accept those before names.
-          resolve: (text) =>
-            byId.has(text) ? text : byName.get(text.trim().toLowerCase()),
-        },
-      },
-    };
-  }, [settings, companies]);
+    }),
+    [settings],
+  );
 }
