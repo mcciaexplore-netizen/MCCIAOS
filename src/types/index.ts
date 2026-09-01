@@ -29,7 +29,6 @@ export interface AppSettings {
 
 export interface Creative {
   id: string;
-  companyId?: string;
   platform: CreativePlatform;
   status: CreativeStatus;
   imageUrl?: string;

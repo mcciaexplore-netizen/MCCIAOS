@@ -1,10 +1,14 @@
 # MCCIA OS
 
-Internal workspace for the MCCIA Applied AI Studio team to manage MSME clients,
-consulting sessions, app-dev projects, social content, and shared resources. The
-team enters everything directly through the app. Built to the specs in `PRD.md`,
-`TRD.md`, `APP_FLOW.md`, `BACKEND_SCHEMA.md`, `UI_UX_BRIEF.md`, and
-`IMPLEMENTATION_PLAN.md`.
+Internal workspace for the MCCIA Applied AI Studio team: the daily work log,
+workshops and events, social content, outreach messages and shared resources.
+The team enters everything directly through the app.
+
+Originally built to the specs in `PRD.md`, `TRD.md`, `APP_FLOW.md`,
+`BACKEND_SCHEMA.md`, `UI_UX_BRIEF.md` and `IMPLEMENTATION_PLAN.md`. Those
+documents still describe the Dashboard, Companies, Consulting, App Development
+and Analytics modules, which have since been removed — see
+[Removed modules](#removed-modules).
 
 ## Quick start
 
@@ -33,35 +37,46 @@ Other scripts: `npm run build` (typecheck + prod build), `npm run typecheck`.
 
 | Layer | Choice |
 |---|---|
-| Frontend | React 18 + TypeScript + Vite, Tailwind, React Query, react-hook-form + Zod, react-router (lazy pages), dnd-kit |
+| Frontend | React 18 + TypeScript + Vite, Tailwind, React Query, react-hook-form + Zod, react-router (lazy pages) |
 | API | Runtime-agnostic handler in `server/handlers.ts`, shared by Vite dev middleware (`server/vite-plugin.ts`) and a Vercel catch-all (`api/[...path].ts`) |
 | Data | Single generic `records` table (JSONB `data` + `sheet` discriminator). Neon Postgres when `DATABASE_URL` is set (`db/migrations.sql`), else a local JSON file store |
 
 **Exception — Workshops & Events** is the one module with dedicated tables
 (`db/events.sql`), because its rules are relational: a unique `(type, serial_no)`
 pair driving code generation, a participant foreign key that cascades, and
-counts that aggregate child rows. Like Analytics, it needs real SQL and so
-requires `DATABASE_URL`; without it those routes answer `503` rather than
-failing obscurely. See [Workshops & Events](#workshops--events) below.
+counts that aggregate child rows. It needs real SQL and so requires
+`DATABASE_URL`; without it those routes answer `503` rather than failing
+obscurely. The Daily Work Log is the same. See
+[Workshops & Events](#workshops--events) below.
 
 ### Open access (no identity)
-There is no login, name-picker, or per-user identity. The app is open to
-everyone on the team. The only notion of a person is the **Assigned to** field
-on companies, sessions, projects, and creatives (chosen from the team roster in
-`src/constants`), so you can see who owns what. List views have an **assignee
-filter** (All assignees / each member / Unassigned). Assignment is a label for
-coordination, never an access boundary.
+There is no login, name-picker, or per-user session. The app is open to
+everyone on the team. Two separate notions of a person exist:
+
+- The **Assigned to** field on creatives and messages, a plain name drawn from
+  the team roster in Settings.
+- The **`users` table**, added for the Daily Work Log and seeded from that same
+  roster (`db/daily-logs.sql`).
+
+Neither is an access boundary — both are labels for coordination. Making
+ownership real would need actual authentication.
 
 ### Key flows
-- **Companies / Consulting / App Development / Social** — full CRUD through
-  SlideOver drawers; every record can be assigned to a team member.
-- **Assignee filter** on list views and the Dashboard narrows to one person's
-  work (or Unassigned) without any login.
-- **Kanban** stages: Pre Dev → Started → Completed → Deployed → Using (dnd-kit).
-- **Resources** are globally shared — never filtered by assignment.
-- **Companies** support CSV bulk import/export.
+- **Daily Log** is the landing page (`/` redirects to `/daily`): what each
+  person worked on, what came of it, and who has not reported.
 - **Workshops & Events** records every session run, with auto-numbered codes and
   per-participant attendance. See [Workshops & Events](#workshops--events).
+- **Social / Messages / Templates** — full CRUD through SlideOver drawers;
+  records can be assigned to a team member.
+- **Resources** are globally shared — never filtered by assignment.
+- **Social** and **Resources** support CSV/Excel bulk import/export.
+
+### Removed modules
+Dashboard, Companies, Consulting, App Development and Analytics were removed.
+Their pages, routes, nav entries, server code (`server/analytics.ts`,
+`server/reports.ts`) and their `Company` / `Session` / `Followup` / `Project`
+sheets are gone from the types, schemas and store allowlist, and their records
+were deleted from the database. `@dnd-kit/core` and `pdfkit` went with them.
 
 ## Workshops & Events
 
@@ -154,17 +169,19 @@ src/
   lib/           api client, csv, theme, utils, query client
   hooks/         useSheet generic + per-module hooks
   components/    AppLayout, SlideOver, Toast, ui/ primitives, FormControls
-  pages/         Dashboard, Companies, Consulting, AppDevelopment, Events, Social, Resources
+  pages/         Daily* (4), Events*, Social, Resources, Messages, Templates, Settings
 server/          store (file/Postgres), runtime-agnostic handlers, Vite plugin,
-                 events (dedicated-table data access)
+                 events + daily-logs (dedicated-table data access)
 api/             Vercel function wrapper
-db/              production SQL schema + one-time migrations, events schema
+db/              production SQL schema + one-time migrations,
+                 events + daily-logs schemas
 ```
 
 ## Deploying to Neon + Vercel
 1. Run `db/migrations.sql` against your Neon database, then `db/events.sql`
-   (additive and idempotent — it only creates the two Workshops & Events tables
-   and never touches `records`).
+   and `db/daily-logs.sql` (both additive and idempotent — they only create
+   their own tables; `daily-logs.sql` reads `records` once, to seed the team
+   roster from Settings, and never writes to it).
 2. Set `DATABASE_URL` as a Vercel environment variable (the same pooled Neon
    connection string used locally). `server/store.ts` picks up Postgres
    automatically whenever it is present.

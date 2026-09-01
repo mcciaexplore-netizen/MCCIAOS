@@ -51,7 +51,7 @@ const STATUS_TONE: Record<MessageStatus, string> = {
   failed: 'rose',
 };
 
-/** IST calendar day for a stored timestamp, matching the analytics module. */
+/** IST calendar day for a stored timestamp. */
 function istDay(iso?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -62,7 +62,7 @@ function istDay(iso?: string): string {
 /**
  * Zero-filled daily counts for the last `days` IST days.
  *
- * Computed client-side rather than through the analytics endpoints because the
+ * Computed client-side rather than through a dedicated endpoint because the
  * message list is already loaded here and is small — adding a round trip to
  * count what is in memory would be slower, not faster.
  */

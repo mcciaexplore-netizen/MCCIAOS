@@ -29,7 +29,7 @@ import {
   createLog,
   deleteLog,
   getDayStats,
-  // Aliased: server/analytics.ts already exports a getSummary.
+  // Aliased for clarity: this file routes three modules.
   getSummary as getDailySummary,
   listCheckins,
   listLogs,
@@ -267,7 +267,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
 
   // ---- /api/events, /api/participants ------------------------------------
   // Same access position as everything above: unauthenticated, because the app
-  // has no identity to scope by (see the note on /api/analytics).
+  // has no identity to scope by — every route in this file is unauthenticated.
   if (pathname.startsWith('/api/events') || pathname.startsWith('/api/participants')) {
     return handleEvents(req);
   }
@@ -364,7 +364,7 @@ function mapCsvRow(raw: Record<string, string>): Record<string, unknown> {
 /**
  * Routes every /api/events and /api/participants request.
  *
- * Structured like handleAnalytics above: this function owns the routing and
+ * Structured like handleEvents above: this function owns the routing and
  * validation, server/events.ts owns the SQL. Unexpected failures are logged
  * and answered with a fixed message — a raw Postgres error names columns and
  * constraints, which is nothing the client should see.

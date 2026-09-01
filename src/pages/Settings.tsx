@@ -9,9 +9,6 @@ import {
   RotateCcw,
   Check,
   Users,
-  Building2,
-  MessageSquareText,
-  KanbanSquare,
   Megaphone,
   Link2,
   AlertTriangle,
@@ -31,14 +28,8 @@ import type { AppSettings, SheetName, TonedOption } from '@/types';
 function toAppSettings(s: AppSettings): AppSettings {
   return {
     teamMembers: [...s.teamMembers],
-    leadSources: [...s.leadSources],
-    businessScales: [...s.businessScales],
-    membershipStatuses: [...s.membershipStatuses],
     resourceCategories: [...s.resourceCategories],
     creativePlatforms: [...s.creativePlatforms],
-    projectStages: s.projectStages.map((o) => ({ ...o })),
-    companyStatuses: s.companyStatuses.map((o) => ({ ...o })),
-    sessionStatuses: s.sessionStatuses.map((o) => ({ ...o })),
     creativeStatuses: s.creativeStatuses.map((o) => ({ ...o })),
   };
 }
@@ -65,8 +56,10 @@ interface Editor {
   placeholder?: string;
 }
 
-/** Bulk wipe offered in a group's danger zone. Sheets are deleted together
- *  so dependent records (e.g. follow-ups under sessions) never orphan. */
+/** Bulk wipe offered in a group's danger zone. Sheets are deleted together so
+ *  dependent records never orphan. No group declares one at the moment — the
+ *  three that did belonged to removed modules — but the mechanism is kept for
+ *  whatever replaces them. */
 interface DangerAction {
   title: string;
   description: string;
@@ -97,57 +90,6 @@ const GROUPS: Group[] = [
         placeholder: 'Name',
       },
     ],
-  },
-  {
-    id: 'companies',
-    label: 'Companies',
-    icon: Building2,
-    blurb: 'Vocabularies used on the Companies page.',
-    editors: [
-      { key: 'companyStatuses', title: 'Company statuses', description: 'Lifecycle of an MSME record.', kind: 'toned' },
-      { key: 'leadSources', title: 'Lead sources', description: 'How a company first reached you.', kind: 'plain', placeholder: 'Source' },
-      { key: 'businessScales', title: 'Business scales', description: 'MSME size bands.', kind: 'plain', placeholder: 'Scale' },
-      { key: 'membershipStatuses', title: 'Membership statuses', description: 'MCCIA membership state of a company.', kind: 'plain', placeholder: 'Status' },
-    ],
-    danger: {
-      title: 'Delete all companies',
-      description:
-        'Permanently removes every company record. Sessions and projects are kept but lose their link to the deleted companies.',
-      sheets: [{ sheet: 'Company', label: 'companies' }],
-    },
-  },
-  {
-    id: 'consulting',
-    label: 'Consulting',
-    icon: MessageSquareText,
-    blurb: 'Vocabularies used on the Consulting page.',
-    editors: [
-      { key: 'sessionStatuses', title: 'Session statuses', description: 'Status values available on a consulting session.', kind: 'toned' },
-    ],
-    danger: {
-      title: 'Delete all consulting data',
-      description:
-        'Permanently removes every consulting session and every follow-up. Companies are not touched.',
-      sheets: [
-        { sheet: 'Session', label: 'sessions' },
-        { sheet: 'Followup', label: 'follow-ups' },
-      ],
-    },
-  },
-  {
-    id: 'projects',
-    label: 'App Development',
-    icon: KanbanSquare,
-    blurb: 'The Kanban board on the App Development page.',
-    editors: [
-      { key: 'projectStages', title: 'Kanban stages', description: 'Board columns, in order. New companies enter at the first column.', kind: 'toned' },
-    ],
-    danger: {
-      title: 'Delete all projects',
-      description:
-        'Permanently removes every app-development project from the Kanban board. Companies are not touched.',
-      sheets: [{ sheet: 'Project', label: 'projects' }],
-    },
   },
   {
     id: 'social',

@@ -7,10 +7,7 @@ import type { SheetName } from '../types/index.js';
 // sent. The UI constrains the choices to the current settings.
 const vocab = (message: string) => z.string().min(1, message);
 
-// Only the four contact fields are required — everything else can be filled
-// in later, so a company can be captured from the Kanban quick-add.
 export const creativeSchema = z.object({
-  companyId: z.string().optional().or(z.literal('')),
   platform: vocab('Platform is required'),
   status: vocab('Status is required').default(DEFAULT_SETTINGS.creativeStatuses[0].label),
   imageUrl: z.string().url().optional().or(z.literal('')),
@@ -123,7 +120,6 @@ const anyText = z.string().optional();
 const anyVocab = (fallback: string) => z.string().default(fallback);
 
 export const creativeImportSchema = z.object({
-  companyId: anyText,
   platform: anyText,
   status: anyVocab(DEFAULT_SETTINGS.creativeStatuses[0].label),
   imageUrl: anyText,

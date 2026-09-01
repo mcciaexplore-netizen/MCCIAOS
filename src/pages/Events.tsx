@@ -43,9 +43,8 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 /**
- * Filters live in the URL, matching the Analytics page: a filtered view can be
- * pasted to someone else and survives a refresh or a trip into a detail page
- * and back.
+ * Filters live in the URL: a filtered view can be pasted to someone else and
+ * survives a refresh or a trip into a detail page and back.
  */
 function useEventFilters() {
   const [params, setParams] = useSearchParams();

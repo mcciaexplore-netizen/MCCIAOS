@@ -6,9 +6,8 @@
 // unique (type, serial_no) pair driving code generation, a participant foreign
 // key that cascades on delete, and counts that aggregate participant rows.
 //
-// It therefore requires the Postgres backend, exactly as server/analytics.ts
-// does, and reports NO_SQL_MESSAGE when DATABASE_URL is unset rather than
-// silently returning nothing.
+// It therefore requires the Postgres backend, and reports NO_SQL_MESSAGE when
+// DATABASE_URL is unset rather than silently returning nothing.
 
 import { requireSql } from './sql.js';
 import {
