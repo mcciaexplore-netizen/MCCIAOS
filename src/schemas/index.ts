@@ -89,7 +89,6 @@ const tonedList = (label: string) =>
     .min(1, `Keep at least one ${label} entry`);
 
 export const settingsSchema = z.object({
-  teamMembers: nameList('team member').default(DEFAULT_SETTINGS.teamMembers),
   resourceCategories: nameList('resource category').default(
     DEFAULT_SETTINGS.resourceCategories,
   ),

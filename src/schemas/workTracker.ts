@@ -89,3 +89,30 @@ export type TaskInput = z.infer<typeof taskSchema>;
 export type TaskUpdateInput = z.infer<typeof taskUpdateSchema>;
 export type CollaboratorInput = z.infer<typeof collaboratorSchema>;
 export type CollaboratorUpdateInput = z.infer<typeof collaboratorUpdateSchema>;
+
+// ---- Team members ---------------------------------------------------------
+// The roster moved out of the Settings record and into the `users` table, so
+// these guard the Settings team editor as well as the API.
+
+const userFields = z.object({
+  name: z.string().trim().min(1, 'A name is required'),
+  designation: z.string().nullable().optional(),
+  department: z.string().nullable().optional(),
+  // Optional and nullable: existing rows have no email, and inventing one to
+  // satisfy a required field would be fabricating data about a real person.
+  email: z
+    .string()
+    .trim()
+    .email('Enter a valid email')
+    .nullable()
+    .optional()
+    .or(z.literal('')),
+  role: z.enum(['ADMIN', 'MEMBER']).default('MEMBER'),
+  isActive: z.boolean().default(true),
+});
+
+export const userSchema = userFields;
+export const userUpdateSchema = userFields.partial();
+
+export type UserInput = z.infer<typeof userSchema>;
+export type UserUpdateInput = z.infer<typeof userUpdateSchema>;

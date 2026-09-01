@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  ChevronDown,
   Columns3,
   Loader2,
   MoreHorizontal,
@@ -115,6 +116,9 @@ const COLUMN_PREF_KEY = 'mccia.tracker.columns';
 // URL is read first. Empty means All team, which is remembered as a deliberate
 // choice rather than treated as "nothing stored".
 const PERSON_PREF_KEY = 'mccia.tracker.person';
+// Who is adding work. Separate from whose work is on screen, so you can look at
+// a colleague's list while filing your own. Remembered per device.
+const I_AM_PREF_KEY = 'mccia.tracker.iam';
 
 function readStoredPerson(): string | null {
   try {
@@ -156,10 +160,26 @@ export default function WorkTracker() {
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  // The person selected in "Viewing" is also who the app treats as the current
-  // user, since there is no session. It gates the Assigned to me tab and the
-  // approve permission. A label, never a security boundary.
-  const actor = assignee || undefined;
+  const [iAm, setIAmState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(I_AM_PREF_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const setIAm = useCallback((id: string) => {
+    setIAmState(id);
+    try {
+      localStorage.setItem(I_AM_PREF_KEY, id);
+    } catch {
+      /* private mode; the preference just will not persist */
+    }
+  }, []);
+
+  // "I am" is who the app treats as the current user, since there is no
+  // session: it files new work and gates the approve permission. A label,
+  // never a security boundary.
+  const actor = iAm || undefined;
 
   // Remember whoever is selected, and reflect a remembered person back into the
   // URL so the view stays shareable and a refresh keeps it.
@@ -174,6 +194,15 @@ export default function WorkTracker() {
 
   const usersQuery = useQuery({ queryKey: ['tracker-users'], queryFn: () => trackerApi.users() });
   const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
+
+  // Settle on someone once the roster arrives: whoever is being viewed, else
+  // the first member. Never leaves the New task row without an owner.
+  useEffect(() => {
+    if (iAm && users.some((u) => u.id === iAm)) return;
+    const next = users.find((u) => u.id === assignee)?.id ?? users[0]?.id;
+    if (next) setIAm(next);
+  }, [users, assignee, iAm, setIAm]);
+
 
   const filters = useMemo(
     () => ({ tab, assignee, status, priority }),
@@ -320,7 +349,7 @@ export default function WorkTracker() {
   const [collabFor, setCollabFor] = useState<string | null>(null);
 
   const viewingUser = users.find((u) => u.id === assignee) ?? null;
-  const anyFilter = Boolean(assignee || status || priority || tab !== 'all');
+  const anyFilter = Boolean(status || priority || tab !== 'all');
 
   // ---- Keyboard grid navigation -------------------------------------------
   const tableRef = useRef<HTMLTableElement>(null);
@@ -395,41 +424,26 @@ export default function WorkTracker() {
                 </>
               )}
             </div>
-            <Button size="sm" onClick={() => setAdding(true)}>
-              <Plus className="h-4 w-4" /> New task
-            </Button>
           </>
         }
       />
 
-      {/* ---- Header strip. Stacks below 900px, Viewing first. ---- */}
-      <div className="mb-5 flex flex-col gap-3 min-[900px]:flex-row min-[900px]:items-stretch">
-        <div className="order-2 min-[900px]:order-1 min-[900px]:w-56">
-          <TodayBlock
-            data={today.data}
-            loading={today.isLoading}
-            onPick={(t) => set({ tab: t })}
-          />
-        </div>
-        <div className="order-3 min-[900px]:order-2 min-[900px]:flex-1">
-          <SharedBlock
-            tasks={shared.data?.tasks ?? []}
-            loading={shared.isLoading}
-            onSeeAll={() => set({ tab: 'all' })}
-          />
-        </div>
-        <div className="order-1 min-[900px]:order-3 min-[900px]:w-64">
-          <ViewingBlock
-            user={viewingUser}
-            users={users}
-            counts={counts.data}
-            loading={counts.isLoading}
-            // A person is selected but the roster has not arrived yet. Without
-            // this the block briefly reads "All team" while viewing one person,
-            // which is the exact misread it exists to prevent.
-            resolving={Boolean(assignee) && !viewingUser}
-          />
-        </div>
+      {/* ---- Two blocks: whose work is on screen, and who is adding ---- */}
+      <div className="mb-4 grid items-start gap-3 min-[900px]:grid-cols-2">
+        <GroupBlock
+          users={users}
+          selected={assignee}
+          loading={usersQuery.isLoading}
+          counts={counts.data}
+          onSelect={(id) => set({ assignee: id })}
+        />
+        <IAmBlock
+          users={users}
+          selected={iAm}
+          loading={usersQuery.isLoading}
+          onSelect={setIAm}
+          onAdd={() => setAdding(true)}
+        />
       </div>
 
       {/* ---- Tabs ---- */}
@@ -466,55 +480,14 @@ export default function WorkTracker() {
         </div>
       </div>
 
-      {/* ---- Filters + autosave indicator ---- */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="w-44">
-          <Select
-            value={assignee}
-            onChange={(e) => set({ assignee: e.target.value })}
-            aria-label="Filter by person"
-          >
-            <option value="">All team</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-40">
-          <Select
-            value={status}
-            onChange={(e) => set({ status: e.target.value })}
-            aria-label="Filter by status"
-          >
-            <option value="">Any status</option>
-            {TASK_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {TASK_STATUS_LABELS[s]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-36">
-          <Select
-            value={priority}
-            onChange={(e) => set({ priority: e.target.value })}
-            aria-label="Filter by priority"
-          >
-            <option value="">Any priority</option>
-            {TASK_PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {TASK_PRIORITY_LABELS[p]}
-              </option>
-            ))}
-          </Select>
-        </div>
+      {/* Status and priority moved onto the column headers, so this row carries
+          only the save state and a way out of an active filter. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         {anyFilter && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => set({ tab: '', assignee: '', status: '', priority: '' })}
+            onClick={() => set({ tab: '', status: '', priority: '' })}
           >
             Clear filters
           </Button>
@@ -603,11 +576,33 @@ export default function WorkTracker() {
                           c.sticky && 'sticky z-30',
                         )}
                       >
-                        {/* The icon-only columns hide their label so the column
-                            can hold the spec width; screen readers still get it. */}
-                        <span className={c.hideLabel ? 'sr-only' : undefined}>
-                          {c.label}
-                        </span>
+                        {/* Status and priority filter from their own header, as
+                            in Jira, which keeps the filters out of the header
+                            strip without losing them. */}
+                        {c.key === 'status' ? (
+                          <HeaderFilter
+                            label="Status"
+                            value={status}
+                            options={TASK_STATUSES}
+                            labels={TASK_STATUS_LABELS}
+                            onChange={(v) => set({ status: v })}
+                          />
+                        ) : c.key === 'priority' ? (
+                          <HeaderFilter
+                            label="Priority"
+                            hideLabel
+                            value={priority}
+                            options={TASK_PRIORITIES}
+                            labels={TASK_PRIORITY_LABELS}
+                            onChange={(v) => set({ priority: v })}
+                          />
+                        ) : (
+                          /* The icon-only columns hide their label so the column
+                             can hold the spec width; screen readers still get it. */
+                          <span className={c.hideLabel ? 'sr-only' : undefined}>
+                            {c.label}
+                          </span>
+                        )}
                       </th>
                     ))}
                     <th style={{ width: 32, minWidth: 32 }} />
@@ -618,7 +613,7 @@ export default function WorkTracker() {
                     <NewTaskRow
                       users={users}
                       visible={visible}
-                      defaultAssignee={assignee || users[0]?.id}
+                      defaultAssignee={iAm || assignee || users[0]?.id}
                       actor={actor}
                       pending={create.isPending}
                       onCancel={() => setAdding(false)}
@@ -676,194 +671,6 @@ export default function WorkTracker() {
 
       <ActivityPanel task={activityFor} onClose={() => setActivityFor(null)} />
     </div>
-  );
-}
-
-// ---- Header strip blocks ---------------------------------------------------
-
-function TodayBlock({
-  data,
-  loading,
-  onPick,
-}: {
-  data?: { date: string; dueToday: number; overdue: number; completedToday: number };
-  loading: boolean;
-  onPick: (tab: TabKey) => void;
-}) {
-  return (
-    <Card className="h-full p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Today</p>
-      {loading || !data ? (
-        <div className="mt-2 space-y-2">
-          <div className="h-6 w-28 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          <div className="h-4 w-36 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-        </div>
-      ) : (
-        <>
-          <p className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
-            {formatDate(data.date)}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-            <button
-              onClick={() => onPick('due_soon')}
-              className="tabular-nums text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-            >
-              <span className="font-semibold text-slate-800 dark:text-slate-100">
-                {data.dueToday}
-              </span>{' '}
-              due
-            </button>
-            <button
-              onClick={() => onPick('overdue')}
-              className={cn(
-                'tabular-nums hover:underline',
-                data.overdue > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400',
-              )}
-            >
-              <span className="font-semibold">{data.overdue}</span> overdue
-            </button>
-            <button
-              onClick={() => onPick('completed')}
-              className="tabular-nums text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-            >
-              <span className="font-semibold text-slate-800 dark:text-slate-100">
-                {data.completedToday}
-              </span>{' '}
-              completed
-            </button>
-          </div>
-        </>
-      )}
-    </Card>
-  );
-}
-
-function SharedBlock({
-  tasks,
-  loading,
-  onSeeAll,
-}: {
-  tasks: { id: string; ref: string; title: string; people: { id: string; name: string }[] }[];
-  loading: boolean;
-  onSeeAll: () => void;
-}) {
-  const shown = tasks.slice(0, 4);
-  const extra = tasks.length - shown.length;
-  return (
-    <Card className="h-full p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-          Working together
-        </p>
-        <span className="text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-          {loading ? '' : tasks.length}
-        </span>
-      </div>
-      {loading ? (
-        <div className="mt-3 space-y-2">
-          {[0, 1].map((i) => (
-            <div key={i} className="h-5 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          ))}
-        </div>
-      ) : shown.length === 0 ? (
-        // Reads as a statement rather than disappearing, so the strip does not
-        // change height when the team happens to be working solo.
-        <p className="mt-3 text-sm text-slate-400">No shared work right now</p>
-      ) : (
-        <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
-          {shown.map((t) => (
-            <li key={t.id} className="flex items-center gap-3 py-1.5">
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-200">
-                {t.title}
-              </span>
-              <AvatarStack people={t.people.map((p) => ({ name: p.name }))} />
-              <span className="w-4 text-right text-xs tabular-nums text-slate-400">
-                {t.people.length}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {extra > 0 && (
-        <button
-          onClick={onSeeAll}
-          className="mt-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-        >
-          +{extra} more
-        </button>
-      )}
-    </Card>
-  );
-}
-
-function ViewingBlock({
-  user,
-  users,
-  counts,
-  loading,
-  resolving,
-}: {
-  user: User | null;
-  users: User[];
-  counts?: { all: number; overdue: number };
-  loading: boolean;
-  resolving: boolean;
-}) {
-  return (
-    <Card className="h-full p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Viewing</p>
-      <div className="mt-2 flex items-center gap-3">
-        {resolving ? (
-          <>
-            <span className="h-11 w-11 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800" />
-            <span className="h-4 w-24 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          </>
-        ) : user ? (
-          <>
-            <Avatar name={user.name} size={44} />
-            <div className="min-w-0">
-              <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
-                {user.name}
-              </p>
-              {/* Designations are blank until someone fills them in; inventing a
-                  colleague's job title would be fabricating data about a real
-                  person. */}
-              <p className="truncate text-xs text-slate-400">
-                {user.designation ?? 'No designation set'}
-              </p>
-            </div>
-          </>
-        ) : (
-          <>
-            <AvatarStack people={users.map((u) => ({ name: u.name }))} max={4} />
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              All team, {users.length} {users.length === 1 ? 'person' : 'people'}
-            </p>
-          </>
-        )}
-      </div>
-      <p className="mt-2 text-xs text-slate-400">
-        {loading || !counts ? (
-          <span className="inline-block h-3 w-24 animate-pulse rounded bg-slate-100 align-middle dark:bg-slate-800" />
-        ) : (
-          <>
-            <span className="font-medium text-slate-600 dark:text-slate-300">
-              {counts.all}
-            </span>{' '}
-            open
-            {counts.overdue > 0 && (
-              <>
-                {', '}
-                <span className="font-medium text-rose-600 dark:text-rose-400">
-                  {counts.overdue}
-                </span>{' '}
-                overdue
-              </>
-            )}
-          </>
-        )}
-      </p>
-    </Card>
   );
 }
 
@@ -1712,5 +1519,258 @@ function TableSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+// ---- The two header blocks -------------------------------------------------
+
+/**
+ * Whose work is on screen.
+ *
+ * Collapsed it shows the team and their avatars; opening it lists everyone, so
+ * picking a person is one click rather than hunting through a dropdown of
+ * names. "Everyone" is the way back to the whole team.
+ */
+function GroupBlock({
+  users,
+  selected,
+  loading,
+  counts,
+  onSelect,
+}: {
+  users: User[];
+  selected: string;
+  loading: boolean;
+  counts?: { all: number; overdue: number };
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const person = users.find((u) => u.id === selected) ?? null;
+
+  return (
+    <Card className="p-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-slate-800"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+            Group
+          </p>
+          {loading ? (
+            <span className="mt-1 block h-5 w-32 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          ) : person ? (
+            <>
+              <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
+                {person.name}
+              </p>
+              <p className="truncate text-xs text-slate-400">
+                {person.designation ?? 'No designation set'}
+                {counts ? ` · ${counts.all} open` : ''}
+                {counts && counts.overdue > 0 ? `, ${counts.overdue} overdue` : ''}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-slate-900 dark:text-slate-100">
+                Everyone
+              </p>
+              <p className="truncate text-xs text-slate-400">
+                {users.length} {users.length === 1 ? 'person' : 'people'}
+                {counts ? ` · ${counts.all} open` : ''}
+                {counts && counts.overdue > 0 ? `, ${counts.overdue} overdue` : ''}
+              </p>
+            </>
+          )}
+        </div>
+        {!person && users.length > 0 && (
+          <AvatarStack people={users.map((u) => ({ name: u.name }))} max={4} />
+        )}
+        {person && <Avatar name={person.name} size={36} />}
+        <ChevronDown
+          className={cn(
+            'h-4 w-4 shrink-0 text-slate-400 transition-transform',
+            open && 'rotate-180',
+          )}
+        />
+      </button>
+
+      {open && (
+        <ul className="mt-2 max-h-56 overflow-y-auto border-t border-slate-100 pt-2 dark:border-slate-800">
+          <li>
+            <button
+              onClick={() => {
+                onSelect('');
+                setOpen(false);
+              }}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
+                !selected && 'font-medium text-brand-700 dark:text-brand-300',
+              )}
+            >
+              <Users2 className="h-4 w-4 text-slate-400" />
+              Everyone
+            </button>
+          </li>
+          {users.map((u) => (
+            <li key={u.id}>
+              <button
+                onClick={() => {
+                  onSelect(u.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
+                  selected === u.id && 'font-medium text-brand-700 dark:text-brand-300',
+                )}
+              >
+                <Avatar name={u.name} size={20} />
+                <span className="min-w-0 flex-1 truncate">{u.name}</span>
+                {u.designation && (
+                  <span className="shrink-0 truncate text-xs text-slate-400">
+                    {u.designation}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Who is filing the work.
+ *
+ * Deliberately separate from the Group block: you can look at a colleague's
+ * list while adding your own task. New rows are filed under this person, and
+ * the approve permission is checked against them.
+ */
+function IAmBlock({
+  users,
+  selected,
+  loading,
+  onSelect,
+  onAdd,
+}: {
+  users: User[];
+  selected: string;
+  loading: boolean;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+}) {
+  const me = users.find((u) => u.id === selected) ?? null;
+  return (
+    <Card className="p-3">
+      <div className="flex items-center gap-3 px-1">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+            I am
+          </p>
+          {loading ? (
+            <span className="mt-1 block h-9 w-40 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          ) : users.length === 0 ? (
+            <p className="mt-1 text-sm text-slate-400">
+              Nobody on the team yet. Add people in Settings.
+            </p>
+          ) : (
+            <div className="mt-1 flex items-center gap-2">
+              {me && <Avatar name={me.name} size={28} />}
+              <Select
+                value={selected}
+                onChange={(e) => onSelect(e.target.value)}
+                aria-label="Who is adding this work"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+        </div>
+        <Button size="sm" onClick={onAdd} disabled={users.length === 0}>
+          <Plus className="h-4 w-4" /> New task
+        </Button>
+      </div>
+      <p className="mt-2 px-1 text-xs text-slate-400">
+        New work is filed under this name, and only they can approve what they are
+        the approver for.
+      </p>
+    </Card>
+  );
+}
+
+/**
+ * A column header that also filters that column.
+ *
+ * Rendered as a native select behind the header text so it keeps native
+ * keyboard and touch behaviour; an active filter is marked with a dot rather
+ * than a badge, which would not fit a 36px column.
+ */
+function HeaderFilter<T extends string>({
+  label,
+  hideLabel,
+  value,
+  options,
+  labels,
+  onChange,
+}: {
+  label: string;
+  hideLabel?: boolean;
+  value: string;
+  options: readonly T[];
+  labels: Record<T, string>;
+  onChange: (next: string) => void;
+}) {
+  const active = Boolean(value);
+  return (
+    <span className="relative inline-flex items-center gap-1">
+      <span
+        className={cn(
+          'pointer-events-none',
+          hideLabel && 'sr-only',
+          active && 'text-[color:var(--b400)]',
+        )}
+      >
+        {label}
+      </span>
+      {!hideLabel && (
+        <ChevronDown
+          className={cn(
+            'pointer-events-none h-3 w-3',
+            active ? 'text-[color:var(--b400)]' : 'opacity-50',
+          )}
+        />
+      )}
+      {hideLabel && (
+        <ChevronDown
+          className={cn('pointer-events-none h-3 w-3', active ? 'text-[color:var(--b400)]' : 'opacity-50')}
+        />
+      )}
+      {active && (
+        <span
+          aria-hidden
+          style={{ background: 'var(--b400)' }}
+          className="pointer-events-none absolute -right-1 -top-0.5 h-1.5 w-1.5 rounded-full"
+        />
+      )}
+      <select
+        value={value}
+        aria-label={`Filter by ${label.toLowerCase()}`}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 cursor-pointer opacity-0"
+      >
+        <option value="">Any {label.toLowerCase()}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {labels[o]}
+          </option>
+        ))}
+      </select>
+    </span>
   );
 }

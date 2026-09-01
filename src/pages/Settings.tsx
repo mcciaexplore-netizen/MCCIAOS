@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
   Trash2,
@@ -8,6 +8,8 @@ import {
   ChevronDown,
   RotateCcw,
   Check,
+  Loader2,
+  Lock,
   Users,
   Megaphone,
   Link2,
@@ -15,19 +17,29 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
-import { Badge, Button, Card, Input, Modal, Select } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  ErrorState,
+  Field,
+  Input,
+  Modal,
+  Select,
+} from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
 import { api } from '@/lib/api';
+import { trackerApi } from '@/lib/workTrackerApi';
+import type { UserInput, UserUpdateInput } from '@/schemas/workTracker';
 import { cn } from '@/lib/utils';
-import type { AppSettings, SheetName, TonedOption } from '@/types';
+import type { AppSettings, SheetName, TonedOption, User } from '@/types';
 
 // Pull just the persisted keys out of the context value, dropping the derived
 // lookups so they never leak into storage.
 function toAppSettings(s: AppSettings): AppSettings {
   return {
-    teamMembers: [...s.teamMembers],
     resourceCategories: [...s.resourceCategories],
     creativePlatforms: [...s.creativePlatforms],
     creativeStatuses: s.creativeStatuses.map((o) => ({ ...o })),
@@ -73,6 +85,8 @@ interface Group {
   blurb: string;
   editors: Editor[];
   danger?: DangerAction;
+  /** Rendered by a dedicated component rather than the generic list editors. */
+  custom?: 'team';
 }
 
 const GROUPS: Group[] = [
@@ -81,15 +95,8 @@ const GROUPS: Group[] = [
     label: 'Team',
     icon: Users,
     blurb: 'Who work can be assigned to.',
-    editors: [
-      {
-        key: 'teamMembers',
-        title: 'Team members',
-        description: 'The roster behind every “Assigned to” picker and assignee filter.',
-        kind: 'plain',
-        placeholder: 'Name',
-      },
-    ],
+    editors: [],
+    custom: 'team',
   },
   {
     id: 'social',
@@ -112,7 +119,94 @@ const GROUPS: Group[] = [
   },
 ];
 
+// Unlocked for the life of the tab, not remembered on the device: a shared
+// machine should not stay open on Settings after someone walks away.
+const UNLOCK_KEY = 'mccia.settings.unlocked';
+
+/**
+ * Passcode gate for the Settings page.
+ *
+ * IMPORTANT: this hides the page, it does not protect the data. Every route in
+ * this app is unauthenticated, so the same settings can be read and written
+ * directly through /api/records without ever seeing this screen. It is checked
+ * server-side only so the passcode is not sitting in the JavaScript bundle.
+ */
+function PasscodeGate({ onUnlock }: { onUnlock: () => void }) {
+  const [passcode, setPasscode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passcode.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await trackerApi.unlockSettings(passcode);
+      try {
+        sessionStorage.setItem(UNLOCK_KEY, 'true');
+      } catch {
+        /* private mode; the unlock just will not survive a reload */
+      }
+      onUnlock();
+    } catch (err) {
+      setError((err as Error).message || 'That passcode is not right');
+      setPasscode('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader title="Settings" subtitle="Admin only." />
+      <Card className="mx-auto max-w-sm p-6">
+        <div className="mb-4 flex flex-col items-center text-center">
+          <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+            <Lock className="h-5 w-5" />
+          </span>
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+            Enter the admin passcode
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            Settings changes the team roster and the vocabularies the whole app uses.
+          </p>
+        </div>
+        <form onSubmit={submit}>
+          <Input
+            type="password"
+            autoFocus
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            placeholder="Passcode"
+            aria-label="Admin passcode"
+          />
+          {error && (
+            <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>
+          )}
+          <Button type="submit" className="mt-3 w-full" disabled={busy || !passcode.trim()}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            Unlock
+          </Button>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
 export default function Settings() {
+  const [unlocked, setUnlocked] = useState(() => {
+    try {
+      return sessionStorage.getItem(UNLOCK_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  if (!unlocked) return <PasscodeGate onUnlock={() => setUnlocked(true)} />;
+  return <SettingsInner />;
+}
+
+function SettingsInner() {
   const settings = useSettings();
   const save = useSaveSettings();
   const { toast } = useToast();
@@ -229,6 +323,7 @@ export default function Settings() {
         <div>
           <p className="mb-3 text-sm text-slate-500">{tab.blurb}</p>
           <div className="space-y-4">
+            {tab.custom === 'team' && <TeamRoster />}
             {tab.editors.map((e) =>
               e.kind === 'toned' ? (
                 <TonedListEditor
@@ -574,5 +669,276 @@ function TonedListEditor({
         </div>
       ))}
     </SectionShell>
+  );
+}
+
+
+// ---- Team roster -----------------------------------------------------------
+// Backed by the `users` table, which is the single source for the roster. The
+// old list of names on the Settings record is gone: it meant the same team
+// existed in two places that could drift apart.
+
+function TeamRoster() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [adding, setAdding] = useState(false);
+
+  const query = useQuery({
+    queryKey: ['tracker-users', 'all'],
+    queryFn: () => trackerApi.users(true),
+  });
+  const users = query.data?.users ?? [];
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['tracker-users'] });
+  };
+
+  const create = useMutation({
+    mutationFn: (input: UserInput) => trackerApi.createUser(input),
+    onSuccess: () => {
+      invalidate();
+      setAdding(false);
+      toast('Team member added');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const update = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UserUpdateInput }) =>
+      trackerApi.updateUser(id, patch),
+    onSuccess: invalidate,
+    onError: (err: Error) => {
+      toast(err.message, 'error');
+      invalidate();
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => trackerApi.removeUser(id),
+    onSuccess: () => {
+      invalidate();
+      toast('Team member removed');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  if (query.isLoading) {
+    return (
+      <div className="space-y-2">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />
+        ))}
+      </div>
+    );
+  }
+  if (query.isError) {
+    return <ErrorState error={query.error as Error} onRetry={() => query.refetch()} />;
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+            Team members
+          </p>
+          <p className="text-xs text-slate-400">
+            The roster behind every picker in the app. Someone who has left should be
+            made inactive rather than removed, so their work history survives.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setAdding(true)} disabled={adding}>
+          <Plus className="h-4 w-4" /> Add member
+        </Button>
+      </div>
+
+      {adding && (
+        <MemberForm
+          pending={create.isPending}
+          onCancel={() => setAdding(false)}
+          onSave={(input) => create.mutateAsync(input).then(() => undefined)}
+        />
+      )}
+
+      {users.length === 0 && !adding ? (
+        <p className="rounded-lg border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400 dark:border-slate-700">
+          Nobody on the team yet.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {users.map((u) => (
+            <MemberRow
+              key={u.id}
+              user={u}
+              saving={update.isPending}
+              onPatch={(patch) => update.mutate({ id: u.id, patch })}
+              onDelete={() => {
+                if (window.confirm(`Remove ${u.name} from the team?`)) remove.mutate(u.id);
+              }}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function MemberRow({
+  user,
+  saving,
+  onPatch,
+  onDelete,
+}: {
+  user: User;
+  saving: boolean;
+  onPatch: (patch: UserUpdateInput) => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li
+      className={cn(
+        'rounded-lg border border-slate-200 p-3 dark:border-slate-800',
+        !user.isActive && 'opacity-60',
+      )}
+    >
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+            {user.name}
+            {user.role === 'ADMIN' && (
+              <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:bg-brand-950 dark:text-brand-300">
+                Admin
+              </span>
+            )}
+            {!user.isActive && (
+              <span className="ml-2 text-xs font-normal text-slate-400">Inactive</span>
+            )}
+          </p>
+          <p className="truncate text-xs text-slate-400">
+            {[user.designation, user.department, user.email].filter(Boolean).join(' · ') ||
+              'No details yet'}
+          </p>
+        </div>
+        <label className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500">
+          <input
+            type="checkbox"
+            checked={user.isActive}
+            disabled={saving}
+            onChange={(e) => onPatch({ isActive: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600 dark:bg-slate-800"
+          />
+          Active
+        </label>
+        <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
+          {open ? 'Close' : 'Edit'}
+        </Button>
+        <button
+          onClick={onDelete}
+          aria-label={`Remove ${user.name}`}
+          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+
+      {open && (
+        <MemberForm
+          initial={user}
+          pending={saving}
+          onCancel={() => setOpen(false)}
+          onSave={async (input) => {
+            onPatch(input);
+            setOpen(false);
+          }}
+        />
+      )}
+    </li>
+  );
+}
+
+function MemberForm({
+  initial,
+  pending,
+  onCancel,
+  onSave,
+}: {
+  initial?: User;
+  pending: boolean;
+  onCancel: () => void;
+  onSave: (input: UserInput) => Promise<void>;
+}) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [designation, setDesignation] = useState(initial?.designation ?? '');
+  const [department, setDepartment] = useState(initial?.department ?? '');
+  const [email, setEmail] = useState(initial?.email ?? '');
+  const [role, setRole] = useState<'ADMIN' | 'MEMBER'>(initial?.role ?? 'MEMBER');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!name.trim()) {
+      setError('A name is required');
+      return;
+    }
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Enter a valid email, or leave it blank');
+      return;
+    }
+    setError(null);
+    await onSave({
+      name: name.trim(),
+      designation: designation.trim() || null,
+      department: department.trim() || null,
+      email: email.trim() || null,
+      role,
+      isActive: initial?.isActive ?? true,
+    });
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Name" required>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
+        </Field>
+        <Field label="Designation">
+          <Input
+            value={designation}
+            onChange={(e) => setDesignation(e.target.value)}
+            placeholder="Analyst"
+          />
+        </Field>
+        <Field label="Department">
+          <Input
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            placeholder="Applied AI Studio"
+          />
+        </Field>
+        <Field label="Email">
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Optional"
+          />
+        </Field>
+        <Field label="Role">
+          <Select value={role} onChange={(e) => setRole(e.target.value as 'ADMIN' | 'MEMBER')}>
+            <option value="MEMBER">Member</option>
+            <option value="ADMIN">Admin</option>
+          </Select>
+        </Field>
+      </div>
+      {error && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
+      <div className="mt-3 flex justify-end gap-2">
+        <Button variant="secondary" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={submit} disabled={pending}>
+          {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+          {initial ? 'Save' : 'Add member'}
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -14,6 +14,8 @@ import type {
   CollaboratorUpdateInput,
   TaskInput,
   TaskUpdateInput,
+  UserInput,
+  UserUpdateInput,
 } from '@/schemas/workTracker';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -57,8 +59,39 @@ function qs(params: object): string {
 }
 
 export const trackerApi = {
-  users() {
-    return request<{ users: User[] }>('/api/users');
+  users(includeInactive = false) {
+    return request<{ users: User[] }>(
+      `/api/users${includeInactive ? '?includeInactive=true' : ''}`,
+    );
+  },
+
+  createUser(input: UserInput) {
+    return request<{ user: User }>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateUser(id: string, patch: UserUpdateInput) {
+    return request<{ user: User }>(`/api/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  },
+
+  removeUser(id: string) {
+    return request<{ success: boolean }>(`/api/users/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * Checks the Settings passcode. Verified server-side so the value is not in
+   * the client bundle — but this gates the page only, never the data.
+   */
+  unlockSettings(passcode: string) {
+    return request<{ ok: boolean }>('/api/settings/unlock', {
+      method: 'POST',
+      body: JSON.stringify({ passcode }),
+    });
   },
 
   tasks(query: TaskQuery) {

@@ -21,7 +21,6 @@ export interface TonedOption {
 }
 
 export interface AppSettings {
-  teamMembers: string[];
   resourceCategories: string[];
   creativePlatforms: string[];
   creativeStatuses: TonedOption[];

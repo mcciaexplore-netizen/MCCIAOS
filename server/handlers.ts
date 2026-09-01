@@ -19,6 +19,8 @@ import {
   collaboratorUpdateSchema,
   taskSchema,
   taskUpdateSchema,
+  userSchema,
+  userUpdateSchema,
 } from '../src/schemas/workTracker.js';
 import { parseCsv, toCsv } from '../src/lib/csv.js';
 import { isIsoDate } from '../src/lib/ist.js';
@@ -26,6 +28,9 @@ import {
   TrackerError,
   addCollaborator,
   createTask,
+  createUser,
+  deleteUser,
+  updateUser,
   deleteTask,
   getActivity,
   getShared,
@@ -270,6 +275,23 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   // has no identity to scope by — every route in this file is unauthenticated.
   if (pathname.startsWith('/api/events') || pathname.startsWith('/api/participants')) {
     return handleEvents(req);
+  }
+
+  // ---- /api/settings/unlock ---------------------------------------------
+  // Gates the Settings *page*, nothing more. Every route in this file is
+  // unauthenticated, so anyone can still read or write settings directly
+  // through /api/records — this keeps the page out of casual reach, it is not
+  // a security boundary. It is checked here rather than in the client so the
+  // passcode is not sitting in the JavaScript bundle.
+  if (pathname === '/api/settings/unlock') {
+    if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+    const body = (req.body ?? {}) as { passcode?: unknown };
+    const supplied = typeof body.passcode === 'string' ? body.passcode : '';
+    const expected = process.env.SETTINGS_PASSCODE?.trim() || 'mccia1934';
+    if (supplied !== expected) {
+      return json(401, { error: 'That passcode is not right' });
+    }
+    return json(200, { ok: true });
   }
 
   // ---- /api/tasks, /api/users, /api/summary, /api/today, /api/shared -----
@@ -614,10 +636,37 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
   try {
     // ---- /api/users --------------------------------------------------------
     if (pathname === '/api/users') {
-      if (method !== 'GET') return json(405, { error: 'Method not allowed' });
-      return json(200, {
-        users: await listUsers(query.get('includeInactive') === 'true'),
-      });
+      if (method === 'GET') {
+        return json(200, {
+          users: await listUsers(query.get('includeInactive') === 'true'),
+        });
+      }
+      if (method === 'POST') {
+        const parsed = userSchema.safeParse(camelBody(req.body));
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        return json(201, { user: await createUser(parsed.data) });
+      }
+      return json(405, { error: 'Method not allowed' });
+    }
+
+    const userMatch = pathname.match(/^\/api\/users\/([^/]+)$/);
+    if (userMatch && userMatch[1] !== 'sync') {
+      const id = userMatch[1];
+      if (method === 'PATCH') {
+        const parsed = userUpdateSchema.safeParse(camelBody(req.body));
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        const user = await updateUser(id, parsed.data);
+        if (!user) return json(404, { error: 'Not found' });
+        return json(200, { user });
+      }
+      if (method === 'DELETE') {
+        const ok = await deleteUser(id);
+        if (!ok) return json(404, { error: 'Not found' });
+        return json(200, { success: true });
+      }
+      return json(405, { error: 'Method not allowed' });
     }
 
     // ---- /api/summary — one call, every tab badge --------------------------

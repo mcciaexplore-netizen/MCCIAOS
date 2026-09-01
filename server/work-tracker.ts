@@ -733,3 +733,131 @@ export async function removeCollaborator(
   ]);
   return getTask(taskId);
 }
+
+// ---- User management -------------------------------------------------------
+// The team roster used to live as a list of names in the Settings record. It is
+// now this table, so Settings edits these rows and everything that needs names
+// derives them from here. One roster, one place.
+
+export interface UserWriteInput {
+  name: string;
+  designation?: string | null;
+  department?: string | null;
+  email?: string | null;
+  role?: 'ADMIN' | 'MEMBER';
+  isActive?: boolean;
+}
+
+export async function createUser(input: UserWriteInput): Promise<User> {
+  const db = requireSql();
+  const name = input.name.trim();
+  if (!name) throw new TrackerError('A name is required', 422);
+  try {
+    const rows = (await db.query(
+      `insert into users (name, designation, department, email, role, is_active)
+       values ($1, $2, $3, $4, coalesce($5, 'MEMBER'), coalesce($6, true))
+       returning id`,
+      [
+        name,
+        blank(input.designation),
+        blank(input.department),
+        blank(input.email),
+        input.role ?? null,
+        input.isActive ?? null,
+      ],
+    )) as { id: string }[];
+    const created = (await listUsers(true)).find((u) => u.id === rows[0].id);
+    if (!created) throw new Error('User vanished immediately after insert');
+    return created;
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      throw new TrackerError(
+        `Somebody called "${name}" is already on the team`,
+        409,
+      );
+    }
+    throw err;
+  }
+}
+
+export async function updateUser(
+  id: string,
+  patch: Partial<UserWriteInput>,
+): Promise<User | null> {
+  if (!UUID_RE.test(id)) return null;
+  const db = requireSql();
+
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  const set = (column: string, value: unknown) => {
+    params.push(value);
+    sets.push(`${column} = $${params.length}`);
+  };
+
+  if (patch.name !== undefined) {
+    const name = patch.name.trim();
+    if (!name) throw new TrackerError('A name cannot be blank', 422);
+    set('name', name);
+  }
+  if (patch.designation !== undefined) set('designation', blank(patch.designation));
+  if (patch.department !== undefined) set('department', blank(patch.department));
+  if (patch.email !== undefined) set('email', blank(patch.email));
+  if (patch.role !== undefined) set('role', patch.role);
+  if (patch.isActive !== undefined) set('is_active', Boolean(patch.isActive));
+
+  if (sets.length === 0) return (await listUsers(true)).find((u) => u.id === id) ?? null;
+
+  sets.push('updated_at = now()');
+  params.push(id);
+  try {
+    const rows = (await db.query(
+      `update users set ${sets.join(', ')} where id = $${params.length}::uuid returning id`,
+      params,
+    )) as { id: string }[];
+    if (!rows[0]) return null;
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') {
+      throw new TrackerError('That name or email is already taken', 409);
+    }
+    throw err;
+  }
+  return (await listUsers(true)).find((u) => u.id === id) ?? null;
+}
+
+/**
+ * Removes someone from the roster.
+ *
+ * Refused while any work still points at them: their tasks, the tasks they
+ * approve, and the archived Daily Work Log all reference this row, and deleting
+ * it would either fail on the foreign key or erase history. Deactivating is the
+ * right move for someone who has left — they stop appearing in pickers and
+ * their work stays intact.
+ */
+export async function deleteUser(id: string): Promise<boolean> {
+  if (!UUID_RE.test(id)) return false;
+  const db = requireSql();
+
+  const refs = (await db.query(
+    `select
+       (select count(*) from tasks
+         where assignee_id = $1::uuid or allocated_by = $1::uuid
+            or report_to = $1::uuid or approver_id = $1::uuid)::int as tasks,
+       (select count(*) from task_collaborators where user_id = $1::uuid)::int as collabs,
+       (select count(*) from daily_logs_archive where user_id = $1::uuid)::int as archived`,
+    [id],
+  )) as Record<string, number>[];
+  const r = refs[0] ?? {};
+  const total = Number(r.tasks ?? 0) + Number(r.collabs ?? 0) + Number(r.archived ?? 0);
+  if (total > 0) {
+    throw new TrackerError(
+      `That person is on ${total} record${total === 1 ? '' : 's'}. Mark them inactive instead, which keeps their work and removes them from the pickers.`,
+      409,
+    );
+  }
+
+  const rows = (await db.query(
+    `delete from users where id = $1::uuid returning id`,
+    [id],
+  )) as { id: string }[];
+  return rows.length > 0;
+}

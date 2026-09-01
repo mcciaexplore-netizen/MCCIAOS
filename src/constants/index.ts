@@ -26,7 +26,6 @@ export const BADGE_TONES = [
 // superseded by the stored AppSettings record — read them via useSettings(),
 // not by importing from here.
 export const DEFAULT_SETTINGS: AppSettings = {
-  teamMembers: ['Ismail', 'Ziya', 'Sujal', 'Pratik', 'Taniya', 'Rutuja'],
   resourceCategories: ['Sheet', 'Dashboard', 'Automation', 'Docs', 'Other'],
   creativePlatforms: [
     'WhatsApp',

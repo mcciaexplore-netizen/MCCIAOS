@@ -150,13 +150,47 @@ move the focused cell.
 Text cells never fire a request per keystroke, so the 400ms debounce the spec
 asks for is not needed — commit happens on blur or Enter.
 
+### The two header blocks
+
+- **Group** — whose work is on screen. Click it to open the roster, pick a
+  person or Everyone. Filters the table and the tab badges.
+- **I am** — who is filing the work. New rows are assigned to this person and
+  the approve permission is checked against them. Deliberately separate from
+  Group, so you can look at a colleague's list while adding your own task.
+
+Status and priority filter from their own **column headers**, Jira-style, so
+neither takes space in the header. Both stay in the URL and compose with tabs.
+
 ### Identity
 
-There is no login. The person selected in the header's **Viewing** block is
-treated as the current user: it gates the "Assigned to me" tab and the approve
-permission, and pre-fills `allocated_by` on a new row. It is passed to the API
-as `?actor=`. **This is a label, not authentication** — a caller can name
-anyone. Real enforcement needs the auth described above.
+There is no login. The **I am** block is treated as the current user: it gates
+the approve permission and owns new rows, and is passed to the API as
+`?actor=`. **This is a label, not authentication** — a caller can name anyone.
+Real enforcement needs the auth described above.
+
+### Settings passcode
+
+Settings is behind a passcode, checked server-side against `SETTINGS_PASSCODE`
+(default `mccia1934`) so the value is never in the client bundle. The unlock
+lasts for the browser tab, not the device.
+
+**It hides the page, it does not protect the data.** Every route in this app is
+unauthenticated, so the same settings can be read and written directly through
+`/api/records` without ever seeing the prompt. It keeps the page out of casual
+reach; that is all.
+
+### Team roster
+
+Team members are managed on the Settings page and stored in the `users` table —
+name, designation, department, email, role and an active flag. The roster used
+to also exist as a list of names on the Settings record; that is gone, so the
+team lives in one place. Everything that needs names (the assignee pickers on
+Social and Messages, the import/export vocabularies) reads back from `users`.
+
+Someone who leaves should be marked **inactive** rather than removed: they drop
+out of every picker while their work history survives. Deleting is refused with
+a `409` while any task, collaboration or archived daily log still points at
+them.
 
 ### Sample data
 
