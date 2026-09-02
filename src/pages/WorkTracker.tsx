@@ -589,9 +589,21 @@ export default function WorkTracker() {
               ))}
             </Select>
           </div>
-          <Button size="sm" onClick={() => setAdding(true)} disabled={users.length === 0}>
-            <Plus className="h-4 w-4" /> New task
-          </Button>
+          {/* Only on the work table. Offering "New task" while the consultations
+              table is up would be a button that silently swaps which table you
+              are looking at — the Work pill is the way back, and it says so. */}
+          {view === 'work' && (
+            <Button
+              size="sm"
+              onClick={() => {
+                setAddingConsultation(false);
+                setAdding(true);
+              }}
+              disabled={users.length === 0}
+            >
+              <Plus className="h-4 w-4" /> New task
+            </Button>
+          )}
           {/* Beside New task, because the two are the same kind of act: putting
               a new record in. Which table it lands in is the difference. */}
           <Button
