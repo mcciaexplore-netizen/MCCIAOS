@@ -100,6 +100,12 @@ function sendJson(
   binary?: boolean,
 ) {
   res.statusCode = status;
+  // Never cached. Every route here returns live state — the session endpoint
+  // most of all, where a stale 200 tells somebody they are signed out (or in)
+  // when they are not. A 200 with no cache headers is fair game for a browser's
+  // heuristic cache, which is exactly how a fixed sign-in screen kept showing
+  // the old answer.
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   for (const [k, v] of Object.entries(headers ?? {})) res.setHeader(k, v);
   if (binary) {
     // Mirrors api/[...path].ts so downloads behave the same in dev.

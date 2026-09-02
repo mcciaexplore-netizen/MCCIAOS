@@ -51,6 +51,9 @@ function send(
   headers?: Record<string, string>,
   binary?: boolean,
 ) {
+  // Matches the dev middleware: API responses are live state and must never be
+  // served from a browser cache.
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.statusCode = status;
   for (const [k, v] of Object.entries(headers ?? {})) res.setHeader(k, v);
   if (binary) {
