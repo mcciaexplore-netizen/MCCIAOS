@@ -20,6 +20,9 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
+/** Methods whose requests may carry a body. Must match the Vercel adapter. */
+const METHODS_WITH_BODY = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 export function apiMiddleware(): Plugin {
   return {
     name: 'mccia-api-middleware',
@@ -39,10 +42,14 @@ export function apiMiddleware(): Plugin {
             headers[k.toLowerCase()] = Array.isArray(v) ? v.join(',') : v;
           }
 
-          const body =
-            req.method === 'POST' || req.method === 'PATCH'
-              ? await readBody(req)
-              : undefined;
+          // Every method that can carry one. PUT was missing, so a PUT arrived
+          // with no body in development and a full one on Vercel — the handler
+          // saw an empty patch, validated it happily and saved nothing, with a
+          // 200 to say so. Divergence between the two runtimes is worse than
+          // either behaviour on its own.
+          const body = METHODS_WITH_BODY.has(req.method ?? '')
+            ? await readBody(req)
+            : undefined;
 
           const result = await handleApi({
             method: req.method ?? 'GET',

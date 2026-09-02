@@ -96,6 +96,8 @@ const userFields = z.object({
   reportsTo: uuid.nullable().optional(),
   role: z.enum(['ADMIN', 'MEMBER']).default('MEMBER'),
   isActive: z.boolean().default(true),
+  canBeReportedTo: z.boolean().optional(),
+  canApprove: z.boolean().optional(),
 });
 
 export const userSchema = userFields;

@@ -202,6 +202,18 @@ export interface User {
   reportsToName: string | null;
   avatarUrl: string | null;
   isActive: boolean;
+  /**
+   * Who a task's "Reports to" and "Approver" may be set to.
+   *
+   * Flags on the roster rather than a list of names in the code: a name in the
+   * code is wrong the moment somebody leaves or the arrangement changes, and
+   * fixing it would take a deploy. Both are edited on the Settings roster.
+   *
+   * Kept separate rather than folded into one rank. Everyone who approves also
+   * receives reports today, but that is the current arrangement, not a rule.
+   */
+  canBeReportedTo: boolean;
+  canApprove: boolean;
 }
 
 /** The pipeline. Approval is a separate action, not a status. */

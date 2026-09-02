@@ -41,7 +41,7 @@ import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
 } from '@/constants';
-import { useUnlocked } from '@/hooks/useUnlocked';
+import { useAdminSession } from '@/hooks/useAdminSession';
 import { istToday } from '@/lib/ist';
 import { cn } from '@/lib/utils';
 import type { Task, TaskPriority, TaskStatus, User } from '@/types';
@@ -177,6 +177,25 @@ export default function WorkTracker() {
 
   const usersQuery = useQuery({ queryKey: ['tracker-users'], queryFn: () => trackerApi.users() });
   const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
+
+  /**
+   * Reports to and Approver are not the whole roster — reporting goes to a few
+   * people and approval to fewer. Both come from flags on the roster, editable
+   * in Settings, rather than names in this file.
+   *
+   * `keeping` is the person a task already points at. Somebody who has since
+   * lost the flag still has to render, or their name silently disappears from
+   * every task that named them; they are offered on that task and nowhere else.
+   */
+  const reportOptions = useCallback(
+    (keeping: string | null) =>
+      users.filter((u) => u.canBeReportedTo || u.id === keeping),
+    [users],
+  );
+  const approverOptions = useCallback(
+    (keeping: string | null) => users.filter((u) => u.canApprove || u.id === keeping),
+    [users],
+  );
 
   // Remember whoever is selected, and reflect it back into the URL so the view
   // stays shareable and a refresh keeps it. Only ever writes the key when the
@@ -396,7 +415,7 @@ export default function WorkTracker() {
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
   const [addingConsultation, setAddingConsultation] = useState(false);
-  const unlocked = useUnlocked();
+  const { authenticated: unlocked } = useAdminSession();
   const [activityFor, setActivityFor] = useState<Task | null>(null);
 
   const anyFilter = Boolean(status || priority || tab !== 'all');
@@ -768,6 +787,8 @@ export default function WorkTracker() {
                       actor={actor}
                       actorName={actorName}
                       visible={visible}
+                      reportOptions={reportOptions}
+                      approverOptions={approverOptions}
                       unlocked={unlocked}
                       savingCells={savingCells}
                       cellErrors={cellErrors}
@@ -807,6 +828,8 @@ function TaskRow({
   actor,
   actorName,
   visible,
+  reportOptions,
+  approverOptions,
   unlocked,
   savingCells,
   cellErrors,
@@ -820,6 +843,9 @@ function TaskRow({
   actor?: string;
   actorName?: string;
   visible: (k: ColumnKey) => boolean;
+  /** Who this task may report to / be approved by — see the page-level comment. */
+  reportOptions: (keeping: string | null) => User[];
+  approverOptions: (keeping: string | null) => User[];
   /** Whether this tab holds the admin passcode; frozen cells reopen when it does. */
   unlocked: boolean;
   savingCells: Record<string, boolean>;
@@ -991,7 +1017,7 @@ function TaskRow({
         <td {...td('reportTo')}>
           <UserCell
             value={task.reportTo}
-            users={users}
+            users={reportOptions(task.reportTo)}
             ariaLabel={`Reports to, for ${task.title}`}
             onSave={(v) => onSave(task.id, 'reportTo', v)}
             {...cell('reportTo')}
@@ -1003,7 +1029,7 @@ function TaskRow({
         <td {...td('approverId')}>
           <UserCell
             value={task.approverId}
-            users={users}
+            users={approverOptions(task.approverId)}
             ariaLabel={`Approver of ${task.title}`}
             onSave={(v) => onSave(task.id, 'approverId', v)}
             {...cell('approverId')}
@@ -1360,7 +1386,7 @@ function NewTaskRow({
           <td>
             <RowSelect value={reportTo} onChange={(e) => setReportTo(e.target.value)} aria-label="Reports to">
               <option value="">Nobody</option>
-              {users.map((u) => (
+              {users.filter((u) => u.canBeReportedTo).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
@@ -1372,7 +1398,7 @@ function NewTaskRow({
           <td>
             <RowSelect value={approverId} onChange={(e) => setApproverId(e.target.value)} aria-label="Approver">
               <option value="">Nobody</option>
-              {users.map((u) => (
+              {users.filter((u) => u.canApprove).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>

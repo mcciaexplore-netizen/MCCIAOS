@@ -188,6 +188,21 @@ formally allocated is a normal thing to record, and a CHECK that rejects the
 truth teaches people to enter something false. Both are nullable, because "not
 applicable" is a different statement from "none yet" (0).
 
+**Who can be reported to, and who can approve.** A task's Reports to and
+Approver do not offer the whole roster. Two flags on `users` decide it —
+`can_be_reported_to` and `can_approve` — set today to Sujal, Pratik, Ismail and
+Ziya for reporting, and Ismail and Ziya for approval. They are checkboxes on the
+Settings roster, not names in the code, because a name in the code is wrong the
+moment somebody leaves or the arrangement changes and fixing it would take a
+deploy. Migration: `db/reporting-roles.sql`.
+
+The two are separate flags rather than one rank. Everyone who approves also
+receives reports today, but that is the current arrangement, not a rule.
+
+A task that already names somebody who has since lost the flag still shows them,
+and still offers them **on that task only** — otherwise their name would vanish
+from every task that recorded it.
+
 **Recorded work is read-only.** A field that already holds a value cannot be
 changed without the admin passcode, and neither can deleting a task. A field
 that is still empty stays editable — filling in a blank adds information, it
@@ -449,19 +464,75 @@ Nothing here is required: with none of the variables set the app runs exactly as
 before, and the endpoint answers 501 explaining what is missing.
 
 
-## Changing the admin passcode
 
-Set `SETTINGS_PASSCODE` in the deployment environment and redeploy. It gates the
-Settings page, every edit to already-recorded work, deleting, the per-person
-bulk clear, and the manual export run — so changing it changes all of them at
-once, and the previous passcode stops working immediately.
+## Settings and admin access
 
-**It is required in production.** With `SETTINGS_PASSCODE` unset, a deployed
-instance refuses every unlock with a 503 naming the variable, rather than
-falling back to a default. The fallback exists only so `npm run dev` needs no
-configuration; letting it apply to a deploy would mean a forgotten environment
-variable silently kept accepting a passcode that is sitting in this repository,
-while looking exactly as though the new one had taken effect.
+**There are no user accounts in this app.** No login, no roles, no user table
+beyond a roster of names that fills dropdowns. So "admin" is not a role somebody
+holds — it is a password somebody knows, and every visitor is anonymous and
+identical until they present it. There is nobody to hide the Settings link
+*from*, and hiding it would not be protection in any case.
 
-A passcode that has ever been committed should be treated as public. Pick a new
-one rather than reusing anything from this repo's history.
+**The gate.** `ADMIN_SETTINGS_PASSWORD`, compared server-side only. It is never
+sent to the browser, never logged, and never returned by any route. A correct
+password issues a session cookie:
+
+| | |
+| --- | --- |
+| `HttpOnly` | page scripts cannot read it — `document.cookie` returns nothing |
+| `SameSite=Strict` | another origin cannot ride the session |
+| `Secure` | in production; localhost is plain http and would never store it |
+| `Max-Age` | 8 hours, then it lapses on its own |
+
+The cookie is `<expiry>.<hmac>`, signed with a key derived from the password.
+There is no session store because there is nowhere durable a serverless
+invocation could share; two useful things fall out of that. Changing the
+password invalidates every live session, and a stolen cookie stops working at
+its expiry rather than forever. See `server/admin-session.ts`.
+
+**Required in production.** With `ADMIN_SETTINGS_PASSWORD` unset, a deployed
+instance refuses every sign-in with a 503 naming the variable rather than
+falling back to a default — a forgotten environment variable must not silently
+keep accepting a password that is in this repository. `SETTINGS_PASSCODE` is
+still read as the older name for the same thing, so an existing deployment does
+not lose access.
+
+**What replaced what.** The previous scheme kept the password in
+`sessionStorage` and echoed it on every write as `x-settings-passcode`. Anything
+that could run a script in the page could read it there. That is gone —
+`src/lib/lock.ts` and `src/hooks/useUnlocked.ts` are deleted.
+
+**Enforced server-side.** Every write Settings performs checks the session in
+the handler. Hiding the screen is a courtesy to whoever should not be there, not
+the boundary. `GET /api/settings/org` stays open deliberately: the app needs its
+own name and colour to render, and none of it is secret.
+
+**This is still not authentication.** One password is shared by everyone who
+administers the app, so a session proves somebody knew it — never who they were.
+Nothing here can attribute a change to a person.
+
+### What is editable
+
+| Section | Settings |
+| --- | --- |
+| General | application name, tagline, organisation name |
+| Branding | logo upload, brand colour |
+| Contact | email, phone, website, address |
+| Preferences | at-risk window (days), daily export time, export on/off |
+| Notifications | overdue and approval notices, notification address |
+| Team | the roster, and who may be reported to or approve |
+| Work Tracker | the lock, and clearing one person's work |
+
+Stored in `org_settings` — one row, structurally enforced (`id boolean primary
+key`, so a second insert collides rather than creating a rival profile half the
+app would read). Migration: `db/org-settings.sql`.
+
+Two of these were hardcoded and are not any more: the app name and tagline came
+from `src/lib/brand.ts`, and the at-risk window was a literal `+ 3` in the SQL,
+where changing it meant a deploy. The constants remain as the fallback for first
+paint and for an install that has never saved anything.
+
+Validation is defined once, in `src/schemas/orgSettings.ts`, and used by both
+the form and the API — so the two cannot disagree about what is acceptable.
+Unreadable stored values fall back field by field rather than taking the page
+down.

@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const serverKeys = [
     'DATABASE_URL',
+    'ADMIN_SETTINGS_PASSWORD',
     'SETTINGS_PASSCODE',
     'GOOGLE_SERVICE_ACCOUNT_EMAIL',
     'GOOGLE_PRIVATE_KEY',

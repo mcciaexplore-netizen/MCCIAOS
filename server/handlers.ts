@@ -43,6 +43,18 @@ import {
   restoreConsultation,
   updateConsultation,
 } from './consultations.js';
+import {
+  ADMIN_COOKIE,
+  adminPassword,
+  clearedCookie,
+  isAdmin,
+  issueSession,
+  passwordMatches,
+  readSession,
+  sessionCookie,
+} from './admin-session.js';
+import { getOrgSettings, saveOrgSettings } from './org-settings.js';
+import { orgSettingsSchema } from '../src/schemas/orgSettings.js';
 import { runDailyExport } from './daily-export.js';
 import { SheetsError } from './google-sheets.js';
 import {
@@ -85,28 +97,6 @@ import {
 } from './store.js';
 
 /** The one admin passcode. Never sent to the client; only ever compared here. */
-/**
- * Returns null when no passcode is configured and this environment refuses to
- * invent one — which is every deployed environment.
- *
- * The development fallback exists so the app runs with no setup at all. It must
- * never apply in production: a deploy that forgets SETTINGS_PASSCODE would
- * otherwise keep accepting a passcode that is sitting in this repository, and
- * it would do it silently, looking for all the world like the new passcode had
- * been applied. Refusing outright is louder and safer than quietly accepting a
- * known one.
- */
-function adminPasscode(): string | null {
-  const configured = process.env.SETTINGS_PASSCODE?.trim();
-  if (configured) return configured;
-
-  const deployed =
-    Boolean(process.env.VERCEL) || process.env.NODE_ENV === 'production';
-  return deployed ? null : DEV_PASSCODE;
-}
-
-/** Local-only convenience so `npm run dev` needs no configuration. */
-const DEV_PASSCODE = 'mccia1934';
 
 /**
  * Whether a request carries the admin passcode.
@@ -136,10 +126,7 @@ function FIELD_LABELS(field: string): string {
 }
 
 function holdsPasscode(req: ApiRequest): boolean {
-  const expected = adminPasscode();
-  if (!expected) return false;
-  const supplied = req.headers['x-settings-passcode'];
-  return typeof supplied === 'string' && supplied === expected;
+  return isAdmin(req.headers['cookie']);
 }
 
 export interface ApiRequest {
@@ -348,30 +335,107 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     return handleEvents(req);
   }
 
-  // ---- /api/settings/unlock ---------------------------------------------
-  // Gates the Settings *page*, nothing more. Every route in this file is
-  // unauthenticated, so anyone can still read or write settings directly
-  // through /api/records — this keeps the page out of casual reach, it is not
-  // a security boundary. It is checked here rather than in the client so the
-  // passcode is not sitting in the JavaScript bundle.
-  if (pathname === '/api/settings/unlock') {
+  // ---- /api/admin/* --------------------------------------------------------
+  // The admin session: log in, check, log out.
+  //
+  // The password is compared here and never leaves the server. What goes back
+  // is an HttpOnly cookie, so page scripts cannot read it — the previous scheme
+  // kept the password in sessionStorage and echoed it on every write, which any
+  // injected script could have lifted whole.
+  if (pathname === '/api/admin/login') {
     if (method !== 'POST') return json(405, { error: 'Method not allowed' });
-    const body = (req.body ?? {}) as { passcode?: unknown };
-    const supplied = typeof body.passcode === 'string' ? body.passcode : '';
-    const expected = adminPasscode();
+    const body = (req.body ?? {}) as { password?: unknown };
+    const supplied = typeof body.password === 'string' ? body.password : '';
+    const expected = adminPassword();
+
     if (!expected) {
-      // Nothing to check against. Say so plainly rather than rejecting every
-      // passcode as wrong, which would send somebody hunting for a typo that
-      // is not there.
+      // Nothing to check against. Say so plainly rather than calling every
+      // password wrong, which sends somebody hunting for a typo that is not
+      // there.
       return json(503, {
         error:
-          'No admin passcode is configured on the server. Set SETTINGS_PASSCODE in the deployment environment and redeploy.',
+          'No admin password is configured on the server. Set ADMIN_SETTINGS_PASSWORD in the deployment environment and redeploy.',
       });
     }
-    if (supplied !== expected) {
-      return json(401, { error: 'That passcode is not right' });
+    if (!supplied || !passwordMatches(supplied, expected)) {
+      // Deliberately identical for a blank, a wrong, and a nearly-right
+      // password, and it never echoes what was sent.
+      return json(401, { error: 'That password is not right' });
     }
-    return json(200, { ok: true });
+
+    const { token, expiresAt } = issueSession(expected);
+    return {
+      status: 200,
+      body: { ok: true, expiresAt },
+      headers: { 'Set-Cookie': sessionCookie(token, expiresAt) },
+    };
+  }
+
+  if (pathname === '/api/admin/session') {
+    if (method !== 'GET') return json(405, { error: 'Method not allowed' });
+    const state = readSession(req.headers['cookie']);
+    return json(200, {
+      authenticated: state.valid,
+      expiresAt: state.valid ? state.expiresAt : null,
+      // Lets the page say "your session expired" rather than a blank prompt.
+      reason: state.valid ? undefined : state.reason,
+      configured: adminPassword() !== null,
+    });
+  }
+
+  if (pathname === '/api/admin/logout') {
+    if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+    // Unconditional: logging out without a session is not an error, and saying
+    // so would confirm whether a cookie was valid.
+    return {
+      status: 200,
+      body: { ok: true },
+      headers: { 'Set-Cookie': clearedCookie() },
+    };
+  }
+
+  // ---- /api/settings/org ---------------------------------------------------
+  // Reads are open: the app needs its own name and colour to render, and none
+  // of it is secret. Writes need the admin session, enforced here rather than
+  // by hiding the form — a hidden form is not a permission check.
+  if (pathname === '/api/settings/org') {
+    if (method === 'GET') return json(200, { settings: await getOrgSettings() });
+
+    if (method === 'PUT' || method === 'PATCH') {
+      if (!isAdmin(req.headers['cookie'])) {
+        return json(403, { error: 'Settings can only be changed by an administrator.' });
+      }
+      // Partial: the page saves one section at a time, so a stale tab cannot
+      // overwrite a field it never displayed.
+      const parsed = orgSettingsSchema.partial().safeParse(camelBody(req.body));
+      if (!parsed.success) {
+        return json(422, {
+          error: 'Some fields need attention',
+          // Field-keyed, so the form can put each message under its own input.
+          fieldErrors: parsed.error.flatten().fieldErrors,
+        });
+      }
+      // A patch with nothing in it is a bug upstream, not a successful save.
+      // Answering 200 here is how an empty PUT looked like it had worked.
+      if (Object.keys(parsed.data).length === 0) {
+        return json(400, { error: 'No settings were sent to save.' });
+      }
+      try {
+        return json(200, { settings: await saveOrgSettings(parsed.data) });
+      } catch (err) {
+        return moduleFailure(err, 'Settings', 'db/org-settings.sql');
+      }
+    }
+    return json(405, { error: 'Method not allowed' });
+  }
+
+  // ---- /api/settings/unlock (retired) --------------------------------------
+  // Kept so an old tab still open on the previous build gets a clear answer
+  // rather than a 404 it cannot explain.
+  if (pathname === '/api/settings/unlock') {
+    return json(410, {
+      error: 'This app now uses an admin session. Reload the page and sign in again.',
+    });
   }
 
   // ---- /api/tasks, /api/users, /api/summary, /api/today, /api/shared -----
@@ -770,8 +834,11 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     }
 
     if (pathname === '/api/at-risk') {
+      // Read per request rather than cached: settings change rarely, and a
+      // stale window would quietly disagree with what Settings shows.
+      const { atRiskDays } = await getOrgSettings();
       if (method !== 'GET') return json(405, { error: 'Method not allowed' });
-      return json(200, { tasks: await getAtRisk(query.get('user')) });
+      return json(200, { tasks: await getAtRisk(query.get('user'), atRiskDays) });
     }
 
     // ---- /api/tasks --------------------------------------------------------

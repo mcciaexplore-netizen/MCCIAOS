@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -10,6 +10,12 @@ import {
   RotateCcw,
   Check,
   Loader2,
+  Building2,
+  Palette,
+  Phone,
+  Bell,
+  SlidersHorizontal,
+  LogOut,
   Lock,
   LockOpen,
   Upload,
@@ -21,6 +27,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
+import { ORG_SECTIONS, OrgSettingsForm, type Section } from '@/components/OrgSettingsForm';
 import {
   Badge,
   Button,
@@ -35,8 +42,8 @@ import { useToast } from '@/components/Toast';
 import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
 import { api } from '@/lib/api';
-import { lock as storeLock, unlock as storeUnlock } from '@/lib/lock';
-import { useUnlocked } from '@/hooks/useUnlocked';
+import { login, logout } from '@/lib/adminSession';
+import { useAdminSession } from '@/hooks/useAdminSession';
 import { trackerApi } from '@/lib/workTrackerApi';
 import type { UserInput, UserUpdateInput } from '@/schemas/workTracker';
 import { cn } from '@/lib/utils';
@@ -93,9 +100,28 @@ interface Group {
   danger?: DangerAction;
   /** Rendered by a dedicated component rather than the generic list editors. */
   custom?: 'team' | 'workTracker';
+  /** An organisation-profile section, rendered by OrgSettingsForm. */
+  org?: Section;
 }
 
+/** Icons for the organisation sections, keyed by id. */
+const SECTION_ICONS: Record<string, LucideIcon> = {
+  general: SlidersHorizontal,
+  branding: Palette,
+  contact: Phone,
+  preferences: Building2,
+  notifications: Bell,
+};
+
 const GROUPS: Group[] = [
+  ...ORG_SECTIONS.map((section) => ({
+    id: section.id,
+    label: section.title,
+    icon: SECTION_ICONS[section.id] ?? SlidersHorizontal,
+    blurb: section.blurb,
+    editors: [] as Editor[],
+    org: section,
+  })),
   {
     id: 'team',
     label: 'Team',
@@ -133,89 +159,161 @@ const GROUPS: Group[] = [
   },
 ];
 
-// Unlocked for the life of the tab, not remembered on the device: a shared
-// machine should not stay open on Settings after someone walks away.
-const UNLOCK_KEY = 'mccia.settings.unlocked';
-
 /**
- * Passcode gate for the Settings page.
+ * Admin gate.
  *
- * IMPORTANT: this hides the page, it does not protect the data. Every route in
- * this app is unauthenticated, so the same settings can be read and written
- * directly through /api/records without ever seeing this screen. It is checked
- * server-side only so the passcode is not sitting in the JavaScript bundle.
+ * This app has no user accounts — no login, no roles, no user table beyond a
+ * roster of names that fills dropdowns. So "admin" is not a role somebody
+ * holds; it is a password somebody knows, and everyone is anonymous until they
+ * present it. There is nobody to hide the Settings link *from*.
+ *
+ * The gate is not the protection. Every endpoint Settings writes through checks
+ * the session server-side and refuses without it, so hiding this screen is a
+ * courtesy to the person who should not be here, not a boundary.
  */
-function PasscodeGate({ onUnlock }: { onUnlock: () => void }) {
-  const [passcode, setPasscode] = useState('');
+function AdminGate({ children }: { children: ReactNode }) {
+  const session = useAdminSession();
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!passcode.trim()) return;
+    if (!password.trim() || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await trackerApi.unlockSettings(passcode);
-      // Shared with the Work Tracker: unlocking here also unfreezes recorded
-      // work, because it is the same permission and the same passcode.
-      storeUnlock(passcode);
-      onUnlock();
+      await login(password);
+      setPassword('');
     } catch (err) {
-      setError((err as Error).message || 'That passcode is not right');
-      setPasscode('');
+      setError((err as Error).message || 'That password is not right');
+      setPassword('');
     } finally {
       setBusy(false);
     }
   };
 
+  // Nothing is known on first paint. Showing a denial here would flash one at
+  // the very person entitled to be here.
+  if (session.checking) {
+    return (
+      <div>
+        <PageHeader title="Settings" subtitle="Checking your access…" />
+        <Card className="mx-auto max-w-sm p-6">
+          <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            One moment
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (session.authenticated) return <>{children}</>;
+
+  const serverHasNoPassword = !session.configured;
+
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Admin only." />
+      <PageHeader title="Settings" subtitle="Administrators only." />
       <Card className="mx-auto max-w-sm p-6">
         <div className="mb-4 flex flex-col items-center text-center">
           <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
             <Lock className="h-5 w-5" />
           </span>
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            Enter the admin passcode
-          </p>
+          <h2 className="text-sm font-medium text-slate-700 dark:text-slate-200">
+            {serverHasNoPassword ? 'Settings is not configured' : 'Administrator sign-in'}
+          </h2>
           <p className="mt-1 text-xs text-slate-400">
-            Settings changes the team roster and the vocabularies the whole app uses.
+            {serverHasNoPassword
+              ? 'No admin password is set on the server, so nobody can sign in. Set ADMIN_SETTINGS_PASSWORD in the deployment environment and redeploy.'
+              : session.reason === 'expired'
+                ? 'Your session ended. Sign in again to continue.'
+                : 'Settings changes the roster and the values the whole app uses.'}
           </p>
         </div>
-        <form onSubmit={submit}>
-          <Input
-            type="password"
-            autoFocus
-            value={passcode}
-            onChange={(e) => setPasscode(e.target.value)}
-            placeholder="Passcode"
-            aria-label="Admin passcode"
-          />
-          {error && (
-            <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>
-          )}
-          <Button type="submit" className="mt-3 w-full" disabled={busy || !passcode.trim()}>
-            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            Unlock
-          </Button>
-        </form>
+
+        {!serverHasNoPassword && (
+          <form onSubmit={submit}>
+            <label htmlFor="admin-password" className="sr-only">
+              Administrator password
+            </label>
+            <Input
+              id="admin-password"
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              aria-label="Administrator password"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'admin-password-error' : undefined}
+            />
+            {error && (
+              <p
+                id="admin-password-error"
+                role="alert"
+                className="mt-2 text-xs text-rose-600 dark:text-rose-400"
+              >
+                {error}
+              </p>
+            )}
+            <Button type="submit" className="mt-3 w-full" disabled={busy || !password.trim()}>
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Sign in
+            </Button>
+          </form>
+        )}
       </Card>
     </div>
   );
 }
 
 export default function Settings() {
-  const [unlocked, setUnlocked] = useState(() => {
-    try {
-      return sessionStorage.getItem(UNLOCK_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
-  if (!unlocked) return <PasscodeGate onUnlock={() => setUnlocked(true)} />;
-  return <SettingsInner />;
+  return (
+    <AdminGate>
+      <SettingsInner />
+    </AdminGate>
+  );
+}
+
+/**
+ * Says whose session this is and ends it.
+ *
+ * Signing out is not decoration: the session is a cookie with hours left on it,
+ * and on a shared machine walking away without a way to end it is the whole
+ * problem.
+ */
+function SessionBar() {
+  const session = useAdminSession();
+  const { toast } = useToast();
+  if (!session.authenticated) return null;
+
+  const minutes = session.expiresAt
+    ? Math.max(0, Math.round((session.expiresAt - Date.now()) / 60000))
+    : null;
+
+  return (
+    <span className="flex items-center gap-2">
+      <span className="hidden text-xs text-slate-400 sm:inline">
+        {minutes !== null && minutes < 60
+          ? `Session ends in ${minutes} min`
+          : 'Signed in as administrator'}
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={async () => {
+          await logout();
+          toast('Signed out');
+        }}
+      >
+        <LogOut className="h-4 w-4" />
+        Sign out
+      </Button>
+    </span>
+  );
 }
 
 function SettingsInner() {
@@ -291,11 +389,19 @@ function SettingsInner() {
     <div>
       <PageHeader
         title="Settings"
-        subtitle="Configure the lists and labels used across the app"
+        subtitle="Organisation details, the team roster, and the values the rest of the app reads."
         actions={
-          <Button variant="secondary" size="sm" onClick={handleReset}>
-            <RotateCcw className="h-4 w-4" /> Reset to defaults
-          </Button>
+          <>
+            <SessionBar />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleReset}
+              title="Resets the Social and Resources vocabularies. Organisation sections have their own Reset."
+            >
+              <RotateCcw className="h-4 w-4" /> Reset lists
+            </Button>
+          </>
         }
       />
 
@@ -335,6 +441,7 @@ function SettingsInner() {
         <div>
           <p className="mb-3 text-sm text-slate-500">{tab.blurb}</p>
           <div className="space-y-4">
+            {tab.org && <OrgSettingsForm section={tab.org} />}
             {tab.custom === 'team' && <TeamRoster />}
             {tab.custom === 'workTracker' && <WorkTrackerAdmin />}
             {tab.editors.map((e) =>
@@ -358,10 +465,15 @@ function SettingsInner() {
               ),
             )}
           </div>
-          <p className="mt-4 text-xs text-slate-400">
-            Renaming an entry does not rewrite records that already use the old
-            value — those keep their stored label until you edit them.
-          </p>
+          {/* Only meaningful for the vocabulary lists. On an organisation
+              section there is nothing to rename, and the note read as a
+              non-sequitur under the Contact fields. */}
+          {tab.editors.length > 0 && (
+            <p className="mt-4 text-xs text-slate-400">
+              Renaming an entry does not rewrite records that already use the old
+              value — those keep their stored label until you edit them.
+            </p>
+          )}
           {tab.danger && (
             // Keyed by tab so switching sections resets the confirm state.
             <DangerZone key={tab.id} action={tab.danger} />
@@ -369,8 +481,12 @@ function SettingsInner() {
         </div>
       </div>
 
-      {/* Save stays reachable while scrolling, and reports unsaved changes
-          across every section, not just the one on screen. */}
+      {/* The vocabulary lists share one save bar across their sections. The
+          organisation sections each own their save, so showing this too put two
+          "Save changes" buttons on screen meaning different things. */}
+      {/* Not `hidden`: the element carries Tailwind's `flex`, and display:flex
+          beats [hidden]'s display:none, so the bar stayed on screen. */}
+      {!tab.org && (
       <div className="sticky bottom-4 z-20 mt-5 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
         <p className="text-sm text-slate-500">
           {dirty ? (
@@ -391,6 +507,7 @@ function SettingsInner() {
           </Button>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -701,7 +818,7 @@ function TonedListEditor({
 function WorkTrackerAdmin() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const unlocked = useUnlocked();
+  const { authenticated: unlocked } = useAdminSession();
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const usersQuery = useQuery({
@@ -791,8 +908,11 @@ function WorkTrackerAdmin() {
             size="sm"
             onClick={() => {
               if (unlocked) {
-                storeLock();
-                toast('Recorded work is locked again');
+                // Locking recorded work now means ending the admin session, so
+                // it is the same act as signing out — one state, not two that
+                // could disagree.
+                void logout();
+                toast('Signed out. Recorded work is locked again.');
               }
             }}
             disabled={!unlocked}
@@ -1049,6 +1169,37 @@ function TeamRoster() {
   );
 }
 
+/** One roster checkbox. Three sit side by side, so they share a shape. */
+function RosterFlag({
+  label,
+  title,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  title: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label
+      title={title}
+      className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800"
+      />
+      {label}
+    </label>
+  );
+}
+
 function MemberRow({
   user,
   others,
@@ -1094,16 +1245,32 @@ function MemberRow({
               .join(' · ') || 'No details yet'}
           </p>
         </div>
-        <label className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500">
-          <input
-            type="checkbox"
-            checked={user.isActive}
-            disabled={saving}
-            onChange={(e) => onPatch({ isActive: e.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600 dark:bg-slate-800"
-          />
-          Active
-        </label>
+        {/* Who a task's Reports to and Approver may be set to. Flags on the
+            roster rather than names in the code, so changing the arrangement is
+            a checkbox here and not a deploy. Separate on purpose: everyone who
+            approves also receives reports today, but that is the current
+            arrangement, not a rule. */}
+        <RosterFlag
+          label="Reports to"
+          title={`Offer ${user.name} in a task's "Reports to"`}
+          checked={user.canBeReportedTo}
+          disabled={saving || !user.isActive}
+          onChange={(v) => onPatch({ canBeReportedTo: v })}
+        />
+        <RosterFlag
+          label="Approver"
+          title={`Offer ${user.name} in a task's "Approver", and let them sign work off`}
+          checked={user.canApprove}
+          disabled={saving || !user.isActive}
+          onChange={(v) => onPatch({ canApprove: v })}
+        />
+        <RosterFlag
+          label="Active"
+          title={`Whether ${user.name} appears in the app at all`}
+          checked={user.isActive}
+          disabled={saving}
+          onChange={(v) => onPatch({ isActive: v })}
+        />
         <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
           {open ? 'Close' : 'Edit'}
         </Button>

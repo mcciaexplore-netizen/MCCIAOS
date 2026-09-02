@@ -162,7 +162,8 @@ function toTask(row: TaskRow): Task {
 
 const USER_COLUMNS = `
   u.id, u.name, u.email, u.role, u.designation, u.department,
-  u.reports_to, m.name as reports_to_name, u.avatar_url, u.is_active
+  u.reports_to, m.name as reports_to_name, u.avatar_url, u.is_active,
+  u.can_be_reported_to, u.can_approve
 `;
 
 function toUser(r: Record<string, unknown>): User {
@@ -177,6 +178,8 @@ function toUser(r: Record<string, unknown>): User {
     reportsToName: (r.reports_to_name as string | null) ?? null,
     avatarUrl: (r.avatar_url as string | null) ?? null,
     isActive: Boolean(r.is_active),
+    canBeReportedTo: Boolean(r.can_be_reported_to),
+    canApprove: Boolean(r.can_approve),
   };
 }
 
@@ -365,16 +368,25 @@ export async function getToday(user?: string | null): Promise<TodayCounts> {
 }
 
 /** Deadline within three days and still live — the At risk block. */
-export async function getAtRisk(user?: string | null): Promise<AtRiskTask[]> {
+export async function getAtRisk(
+  user?: string | null,
+  /** How many days ahead counts as at risk. Was a literal 3 in this query. */
+  withinDays = 3,
+): Promise<AtRiskTask[]> {
   const db = requireSql();
   const who = user && UUID_RE.test(user) ? user : null;
+  // Clamped rather than trusted: this reaches SQL, and a settings row restored
+  // from an older dump could hold anything.
+  const days = Number.isInteger(withinDays)
+    ? Math.min(30, Math.max(1, withinDays))
+    : 3;
   const rows = (await db.query(
     `select t.id, t.title, uo.name as user_name,
             to_char(t.deadline_date, 'YYYY-MM-DD') as deadline_date
      from tasks t join users uo on uo.id = t.user_id
      where ${LIVE}
        and t.deadline_date is not null
-       and t.deadline_date between ${TODAY} and ${TODAY} + 3
+       and t.deadline_date between ${TODAY} and ${TODAY} + ${days}
        and t.status in ${OPEN}
        and ($1::uuid is null or t.user_id = $1::uuid)
      order by t.deadline_date asc, t.title asc`,
@@ -727,6 +739,8 @@ export interface UserWriteInput {
   designation?: string | null;
   department?: string | null;
   reportsTo?: string | null;
+  canBeReportedTo?: boolean;
+  canApprove?: boolean;
   role?: 'ADMIN' | 'MEMBER';
   isActive?: boolean;
 }
@@ -833,6 +847,10 @@ export async function updateUser(
     set('reports_to', 'reportsTo', patch.reportsTo ?? null, '::uuid');
   if (patch.role !== undefined) set('role', 'role', patch.role);
   if (patch.isActive !== undefined) set('is_active', 'isActive', Boolean(patch.isActive));
+  if (patch.canBeReportedTo !== undefined)
+    set('can_be_reported_to', 'canBeReportedTo', Boolean(patch.canBeReportedTo));
+  if (patch.canApprove !== undefined)
+    set('can_approve', 'canApprove', Boolean(patch.canApprove));
 
   if (sets.length === 0) return existing;
 

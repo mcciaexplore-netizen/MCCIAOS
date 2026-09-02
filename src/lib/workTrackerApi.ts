@@ -1,6 +1,7 @@
 // Typed client for the Work Tracker API.
 // Error handling is deliberately identical to ./api and ./eventsApi.
 
+import type { OrgSettings } from '@/schemas/orgSettings';
 import type {
   AtRiskTask,
   Consultation,
@@ -18,33 +19,31 @@ import type {
   UserInput,
   UserUpdateInput,
 } from '@/schemas/workTracker';
-import { unlockPasscode } from './lock';
-
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 /**
- * Attaches the admin passcode when this tab holds it.
+ * `authorised` no longer adds anything to the request.
  *
- * Only the calls that revise or remove recorded work send it. A read has
- * nothing to authorise, and putting the passcode on every request would spray
- * it across logs and proxies for no benefit.
+ * The admin session is an HttpOnly cookie the browser attaches to same-origin
+ * requests by itself, so there is nothing for this layer to carry. It used to
+ * read the password out of sessionStorage and set a header, which meant any
+ * script running in the page could take it.
+ *
+ * The flag is kept because it documents which calls need an admin — and the
+ * server refuses them without one regardless of what this file does.
  */
-function authHeaders(): Record<string, string> {
-  const passcode = unlockPasscode();
-  return passcode ? { 'x-settings-passcode': passcode } : {};
-}
-
 async function request<T>(
   url: string,
   init?: RequestInit & { authorised?: boolean },
 ): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { ...JSON_HEADERS, ...(init?.authorised ? authHeaders() : {}) },
+    credentials: 'same-origin',
+    headers: JSON_HEADERS,
   });
   const text = await res.text();
 
-  let body: { error?: string } | null = null;
+  let body: { error?: string; fieldErrors?: Record<string, string[]> } | null = null;
   if (text) {
     try {
       body = JSON.parse(text);
@@ -56,7 +55,17 @@ async function request<T>(
       );
     }
   }
-  if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(body?.error || `Request failed (${res.status})`) as Error & {
+      status?: number;
+      fieldErrors?: Record<string, string[]>;
+    };
+    err.status = res.status;
+    // Carried through so a form can put each message under its own input
+    // rather than showing one toast that does not say which field is wrong.
+    err.fieldErrors = (body as { fieldErrors?: Record<string, string[]> })?.fieldErrors;
+    throw err;
+  }
   return (body ?? {}) as T;
 }
 
@@ -108,14 +117,16 @@ export const trackerApi = {
     });
   },
 
-  /**
-   * Checks the Settings passcode. Verified server-side so the value is not in
-   * the client bundle — but this gates the page only, never the data.
-   */
-  unlockSettings(passcode: string) {
-    return request<{ ok: boolean }>('/api/settings/unlock', {
-      method: 'POST',
-      body: JSON.stringify({ passcode }),
+  /** The organisation profile. Reading is open; saving needs an admin session. */
+  orgSettings() {
+    return request<{ settings: OrgSettings }>('/api/settings/org');
+  },
+
+  saveOrgSettings(patch: Partial<OrgSettings>) {
+    return request<{ settings: OrgSettings }>('/api/settings/org', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+      authorised: true,
     });
   },
 

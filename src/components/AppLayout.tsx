@@ -5,22 +5,37 @@ import { NAV_ITEMS } from './navigation';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { APP_NAME, APP_TAGLINE, LOGO_SRC } from '@/lib/brand';
+import { useOrgSettings } from '@/hooks/useOrgSettings';
 
+/**
+ * The name, tagline and logo come from Settings now. The constants in
+ * lib/brand.ts remain the fallback for the first paint and for an install that
+ * has never saved anything — the sidebar must render before the settings
+ * request lands, and it should not flash empty while it waits.
+ */
 function Brand() {
+  const org = useOrgSettings();
+  const name = org.appName || APP_NAME;
+  const tagline = org.appTagline || APP_TAGLINE;
+  const logo = org.logoDataUri || LOGO_SRC;
+
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-white p-1 ring-1 ring-slate-200 dark:ring-slate-700">
-        <img
-          src={LOGO_SRC}
-          alt="MCCIA"
-          className="max-h-full max-w-full object-contain"
-        />
+        {logo ? (
+          <img src={logo} alt={name} className="max-h-full max-w-full object-contain" />
+        ) : (
+          // A lettermark rather than a broken image, when no logo is set.
+          <span className="text-sm font-semibold text-slate-500">
+            {name.slice(0, 2).toUpperCase()}
+          </span>
+        )}
       </div>
       <div className="min-w-0 leading-tight">
         <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-          {APP_NAME}
+          {name}
         </div>
-        <div className="truncate text-[11px] text-slate-400">{APP_TAGLINE}</div>
+        <div className="truncate text-[11px] text-slate-400">{tagline}</div>
       </div>
     </div>
   );
