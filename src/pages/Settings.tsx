@@ -226,7 +226,7 @@ function AdminGate({ children }: { children: ReactNode }) {
           </h2>
           <p className="mt-1 text-xs text-slate-400">
             {serverHasNoPassword
-              ? 'No admin password is set on the server, so nobody can sign in. Set ADMIN_SETTINGS_PASSWORD in the deployment environment and redeploy.'
+              ? 'The server has no admin password loaded. If it is already in .env, restart the dev server — the file is read at startup. On a deployment, set ADMIN_SETTINGS_PASSWORD and redeploy.'
               : session.reason === 'expired'
                 ? 'Your session ended. Sign in again to continue.'
                 : 'Settings changes the roster and the values the whole app uses.'}
