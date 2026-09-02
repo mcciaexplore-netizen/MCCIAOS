@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type React from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
   ChevronDown,
   Columns3,
@@ -64,14 +66,17 @@ const TABS: { key: TabKey; label: string }[] = [
 const COLUMNS = [
   { key: 'name', label: 'Name', width: 132, sticky: true, flex: false, sort: 'name' },
   { key: 'title', label: 'Title', width: 360, sticky: false, flex: true, sort: 'title' },
-  { key: 'priority', label: 'Priority', width: 92, sticky: false, flex: false, sort: '' },
-  { key: 'status', label: 'Status', width: 106, sticky: false, flex: false, sort: '' },
-  { key: 'allocation', label: 'Allocation', width: 96, sticky: false, flex: false, sort: 'allocation' },
-  { key: 'due', label: 'Due', width: 86, sticky: false, flex: false, sort: 'due' },
-  { key: 'deadline', label: 'Deadline', width: 96, sticky: false, flex: false, sort: 'deadline' },
+  { key: 'priority', label: 'Priority', width: 94, sticky: false, flex: false, sort: '' },
+  { key: 'status', label: 'Status', width: 111, sticky: false, flex: false, sort: '' },
+  { key: 'allocation', label: 'Allocation', width: 84, sticky: false, flex: false, sort: 'allocation' },
+  { key: 'due', label: 'Due', width: 114, sticky: false, flex: false, sort: 'due' },
+  { key: 'deadline', label: 'Deadline', width: 114, sticky: false, flex: false, sort: 'deadline' },
   { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
   { key: 'approver', label: 'Approver', width: 132, sticky: false, flex: false, sort: '' },
 ] as const;
+
+/** The trailing column: a row's ⋯ menu, or the new-task row's two buttons. */
+const MENU_WIDTH = 60;
 
 type ColumnKey = (typeof COLUMNS)[number]['key'];
 const COLUMN_PREF_KEY = 'mccia.tracker.columns';
@@ -341,6 +346,21 @@ export default function WorkTracker() {
     [peopleWidth],
   );
 
+  /**
+   * Under table-layout: fixed a cell's own min-width no longer holds a floor —
+   * at 1280px Title was crushed to "Wh.". The floor has to be the table's, so
+   * that a narrow window scrolls the container instead of squeezing the one
+   * column that carries the actual sentence.
+   */
+  const tableMin = useMemo(
+    () =>
+      COLUMNS.filter((c) => visible(c.key)).reduce(
+        (n, c) => n + (c.flex ? c.width : widthOf(c)),
+        MENU_WIDTH,
+      ),
+    [visible, widthOf],
+  );
+
   const [showColumns, setShowColumns] = useState(false);
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
@@ -587,7 +607,17 @@ export default function WorkTracker() {
         ) : (
           <>
             <div className="jira-table hidden max-h-[70vh] overflow-auto md:block">
-              <table ref={tableRef} onKeyDown={onGridKey} className="w-full border-collapse text-left">
+              {/* table-layout: fixed so a column's width is a property of its
+                  header and nothing else. Under auto layout the widest cell
+                  wins, which meant opening the new-task row — whose controls
+                  are inevitably bulkier than the text they replace — dragged
+                  every column out of line with its own heading. */}
+              <table
+                ref={tableRef}
+                onKeyDown={onGridKey}
+                style={{ tableLayout: 'fixed', minWidth: tableMin }}
+                className="w-full border-collapse text-left"
+              >
                 {/* Headers stay put on vertical scroll, the Name column on
                     horizontal. z-30 for the corner cell so it wins both. */}
                 <thead className="sticky top-0 z-20">
@@ -597,7 +627,7 @@ export default function WorkTracker() {
                         key={c.key}
                         style={
                           c.flex
-                            ? { minWidth: c.width }
+                            ? { width: 'auto', minWidth: c.width }
                             : {
                                 width: widthOf(c),
                                 minWidth: widthOf(c),
@@ -635,7 +665,10 @@ export default function WorkTracker() {
                         )}
                       </th>
                     ))}
-                    <th style={{ width: 32, minWidth: 32 }} />
+                    {/* Holds a row's ⋯ menu, and the new-task row's two
+                        buttons — sized for the wider of the two so opening the
+                        row does not reflow the table. */}
+                    <th style={{ width: MENU_WIDTH, minWidth: MENU_WIDTH }} />
                   </tr>
                 </thead>
                 <tbody className="divide-y-0">
@@ -643,6 +676,7 @@ export default function WorkTracker() {
                     <NewTaskRow
                       users={users}
                       visible={visible}
+                      lockedUser={user || undefined}
                       defaultUser={user || actor || users[0]?.id}
                       pending={create.isPending}
                       onCancel={() => setAdding(false)}
@@ -920,9 +954,55 @@ function TaskRow({
 }
 
 /** Inline blank row at the top of the table. Enter commits, Escape discards. */
+/**
+ * The new-task row's controls.
+ *
+ * The form Input/Select are built for a settings panel: 12px side padding, a
+ * 32px arrow well, 8px of vertical padding. Dropped into a 32px table row they
+ * are wider than the column they sit in, and because the table is auto-layout
+ * that pushes every column out of line with its own header the moment the row
+ * opens. These carry the same borders and focus ring at the row's density, so
+ * adding a task leaves the table exactly where it was.
+ */
+const ROW_CONTROL =
+  'w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-sm leading-5 ' +
+  'text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none ' +
+  'focus:ring-2 focus:ring-brand-500/30 dark:border-slate-700 dark:bg-slate-800 ' +
+  'dark:text-slate-100';
+
+const RowInput = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, type, onClick, ...props }, ref) => (
+    <input
+      ref={ref}
+      type={type}
+      className={cn(ROW_CONTROL, type === 'date' && 'row-date', className)}
+      onClick={(e) => {
+        // The calendar button is hidden to fit the column, so the field itself
+        // has to open the picker. Older browsers without showPicker keep the
+        // keyboard entry they always had.
+        if (type === 'date') (e.currentTarget as HTMLInputElement).showPicker?.();
+        onClick?.(e);
+      }}
+      {...props}
+    />
+  ),
+);
+RowInput.displayName = 'RowInput';
+
+/**
+ * Chrome reserves room for a native select arrow *beyond* padding-right, which
+ * is invisible to any width calculation and was eating "Medium" down to "Medi".
+ * Drawing the chevron here makes that space something the column can account
+ * for: 16px, and not a pixel more.
+ */
+function RowSelect({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={cn(ROW_CONTROL, 'row-select', className)} {...props} />;
+}
+
 function NewTaskRow({
   users,
   visible,
+  lockedUser,
   defaultUser,
   pending,
   onCancel,
@@ -930,6 +1010,13 @@ function NewTaskRow({
 }: {
   users: User[];
   visible: (k: ColumnKey) => boolean;
+  /**
+   * Set when the table is filtered to one person. Their work is the only work
+   * this row could be adding, so Name stops being a question and becomes a
+   * statement — a picker there could only ever file the task out of the view
+   * that was just asked for.
+   */
+  lockedUser?: string;
   defaultUser?: string;
   pending: boolean;
   onCancel: () => void;
@@ -944,7 +1031,9 @@ function NewTaskRow({
     approverId?: string | null;
   }) => Promise<void>;
 }) {
-  const [userId, setUserId] = useState(defaultUser ?? users[0]?.id ?? '');
+  const [pickedUser, setPickedUser] = useState(defaultUser ?? users[0]?.id ?? '');
+  const userId = lockedUser ?? pickedUser;
+  const lockedName = lockedUser ? users.find((u) => u.id === lockedUser)?.name : undefined;
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [statusValue, setStatusValue] = useState<TaskStatus>('upcoming');
@@ -997,18 +1086,35 @@ function NewTaskRow({
       <tr onKeyDown={onKey} style={{ background: 'var(--b50)' }}>
         {visible('name') && (
           <td className="sticky z-10" style={{ left: 0, background: 'inherit' }}>
-            <Select value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Name">
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </Select>
+            {lockedUser ? (
+              <span className="flex min-w-0 items-center gap-1.5 px-2">
+                <Avatar name={lockedName ?? ''} size={24} />
+                <span
+                  title={lockedName}
+                  style={{ color: 'var(--n800)' }}
+                  className="min-w-0 flex-1 truncate text-sm"
+                >
+                  {lockedName}
+                </span>
+              </span>
+            ) : (
+              <RowSelect
+                value={pickedUser}
+                onChange={(e) => setPickedUser(e.target.value)}
+                aria-label="Name"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </RowSelect>
+            )}
           </td>
         )}
         {visible('title') && (
           <td>
-            <Input
+            <RowInput
               ref={firstRef}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -1019,7 +1125,7 @@ function NewTaskRow({
         )}
         {visible('priority') && (
           <td>
-            <Select
+            <RowSelect
               value={priority}
               onChange={(e) => setPriority(e.target.value as TaskPriority)}
               aria-label="Priority"
@@ -1029,12 +1135,12 @@ function NewTaskRow({
                   {TASK_PRIORITY_LABELS[p]}
                 </option>
               ))}
-            </Select>
+            </RowSelect>
           </td>
         )}
         {visible('status') && (
           <td>
-            <Select
+            <RowSelect
               value={statusValue}
               onChange={(e) => setStatusValue(e.target.value as TaskStatus)}
               aria-label="Status"
@@ -1044,7 +1150,7 @@ function NewTaskRow({
                   {TASK_STATUS_LABELS[s]}
                 </option>
               ))}
-            </Select>
+            </RowSelect>
           </td>
         )}
         {visible('allocation') && (
@@ -1052,12 +1158,12 @@ function NewTaskRow({
         )}
         {visible('due') && (
           <td>
-            <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} aria-label="Due date" />
+            <RowInput type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} aria-label="Due date" />
           </td>
         )}
         {visible('deadline') && (
           <td>
-            <Input
+            <RowInput
               type="date"
               value={deadlineDate}
               min={dueDate || undefined}
@@ -1068,37 +1174,49 @@ function NewTaskRow({
         )}
         {visible('reportTo') && (
           <td>
-            <Select value={reportTo} onChange={(e) => setReportTo(e.target.value)} aria-label="Reports to">
+            <RowSelect value={reportTo} onChange={(e) => setReportTo(e.target.value)} aria-label="Reports to">
               <option value="">Nobody</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
               ))}
-            </Select>
+            </RowSelect>
           </td>
         )}
         {visible('approver') && (
           <td>
-            <Select value={approverId} onChange={(e) => setApproverId(e.target.value)} aria-label="Approver">
+            <RowSelect value={approverId} onChange={(e) => setApproverId(e.target.value)} aria-label="Approver">
               <option value="">Nobody</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
               ))}
-            </Select>
+            </RowSelect>
           </td>
         )}
-        <td className="text-right">
-          <div className="flex items-center gap-1">
-            <Button size="sm" onClick={() => void commit()} disabled={pending} aria-label="Add task">
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
-            </Button>
+        <td className="px-1">
+          <div className="flex items-center justify-end gap-0.5">
+            <button
+              onClick={() => void commit()}
+              disabled={pending}
+              aria-label="Add task"
+              title="Add task (Enter)"
+              className="rounded p-1 text-white disabled:opacity-60"
+              style={{ background: 'var(--b400)' }}
+            >
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
+            </button>
             <button
               onClick={onCancel}
               aria-label="Discard new task"
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Discard (Esc)"
+              className="rounded p-1 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
             >
               <X className="h-4 w-4" />
             </button>

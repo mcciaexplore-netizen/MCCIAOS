@@ -143,3 +143,29 @@ body {
   white-space: nowrap;
   border-width: 0;
 }
+
+/* The new-task row's date fields.
+   Chrome sizes type="date" from "dd/mm/yyyy" plus a calendar button: 111px,
+   where the column has 86. The button is the 20px that does not fit, and it is
+   the part worth losing — the field calls showPicker() on click, so the whole
+   control opens the calendar instead of one small button at its edge. */
+.row-date::-webkit-calendar-picker-indicator {
+  display: none;
+}
+.row-date::-webkit-datetime-edit {
+  padding: 0;
+}
+
+/* The new-task row's selects.
+   Chrome's native arrow is drawn outside padding-right, so no column width can
+   allow for it — it silently ate the last characters of "Medium" and
+   "Upcoming". Owning the chevron makes that space measurable: 16px exactly. */
+.row-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 16px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 8px 5px;
+}

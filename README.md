@@ -144,12 +144,29 @@ Name, Title, Priority, Status, Allocation, Due, Deadline, Reports to, Approver,
 and the row menu. **Name is sticky**; the rest scroll. Column visibility is
 per-user in `localStorage`.
 
-Widths come from the content, not from round numbers: the three people columns
-are measured against the longest name in the roster on every render, so adding
-somebody called "Vedshri Kulkarni" widens them rather than cutting the name off.
-Title takes whatever space is left and holds a floor so it stays readable when
-the window is narrow. Long titles and names carry a hover tooltip, because an
-editable cell can always be given more text than fits.
+Widths come from the content, not from round numbers. Each column is sized to
+the widest thing it can ever hold — "Completed", "Medium", "dd/mm/yyyy" — and
+the three people columns are measured against the longest name in the roster on
+every render, so adding somebody called "Vedshri Kulkarni" widens them rather
+than cutting the name off. Long titles and names carry a hover tooltip, because
+an editable cell can always be given more text than fits.
+
+The table is `table-layout: fixed`, which makes a column's width a property of
+its header and nothing else. Under auto layout the widest cell won, so opening
+the new-task row — whose controls are inevitably bulkier than the text they
+stand in for — dragged every column out of line with its own heading. Two
+consequences follow. The row's inputs use `ROW_CONTROL`, the form controls at
+the 32px row's density, and they draw their own select chevron: Chrome reserves
+space for the native arrow *outside* padding-right, where no width calculation
+can see it, and that invisible space was eating "Medium" down to "Medi". And
+Title's floor has to be the table's `minWidth` rather than the cell's, since a
+fixed layout ignores a cell's own minimum — otherwise a 1280px window crushed
+the one column carrying the actual sentence down to "Wh.".
+
+**Adding work while viewing one person.** Filtered to somebody, the new row's
+Name is frozen to them — their avatar and name, no picker. A picker there could
+only ever file the task out of the view that was just asked for. Viewing
+everyone, it is a picker again, defaulting to whoever is set on the right.
 
 ### Identity
 
