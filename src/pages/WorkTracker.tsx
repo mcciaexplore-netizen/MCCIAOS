@@ -24,6 +24,7 @@ import { SlideOver } from '@/components/SlideOver';
 import {
   Avatar,
   EditableDate,
+  EditableNumber,
   EditableText,
   IconSelect,
   Lozenge,
@@ -40,7 +41,6 @@ import {
   TASK_STATUS_LABELS,
 } from '@/constants';
 import { useUnlocked } from '@/hooks/useUnlocked';
-import { lock as storeLock, unlock as storeUnlock } from '@/lib/lock';
 import { istToday } from '@/lib/ist';
 import { cn } from '@/lib/utils';
 import type { Task, TaskPriority, TaskStatus, User } from '@/types';
@@ -75,6 +75,10 @@ const COLUMNS = [
   { key: 'allocation', label: 'Allocation', width: 80, sticky: false, flex: false, sort: 'allocation' },
   { key: 'due', label: 'Due', width: 130, sticky: false, flex: false, sort: 'due' },
   { key: 'deadline', label: 'Deadline', width: 130, sticky: false, flex: false, sort: 'deadline' },
+  { key: 'percentage', label: 'Percentage', width: 92, sticky: false, flex: false, sort: '' },
+  { key: 'consultsAllocated', label: 'Consults allocated', width: 132, sticky: false, flex: false, sort: '' },
+  { key: 'consultsDone', label: 'Consults done', width: 110, sticky: false, flex: false, sort: '' },
+  { key: 'callingsDone', label: 'Callings done', width: 110, sticky: false, flex: false, sort: '' },
   { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
   { key: 'approver', label: 'Approver', width: 132, sticky: false, flex: false, sort: '' },
 ] as const;
@@ -387,7 +391,6 @@ export default function WorkTracker() {
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
   const unlocked = useUnlocked();
-  const [askPasscode, setAskPasscode] = useState(false);
   const [activityFor, setActivityFor] = useState<Task | null>(null);
 
   const anyFilter = Boolean(status || priority || tab !== 'all');
@@ -542,7 +545,7 @@ export default function WorkTracker() {
               Clear filters
             </Button>
           )}
-          <LockButton unlocked={unlocked} onAsk={() => setAskPasscode(true)} />
+          <LockStatus unlocked={unlocked} />
           {/* One control, doing both jobs: it narrows the table to one person
               and names who new work is filed under. Left on Everyone the table
               shows the whole team, which is what it opens on. */}
@@ -745,7 +748,6 @@ export default function WorkTracker() {
         )}
       </Card>
 
-      <PasscodePrompt open={askPasscode} onClose={() => setAskPasscode(false)} />
       <ActivityPanel task={activityFor} onClose={() => setActivityFor(null)} />
     </div>
   );
@@ -923,6 +925,52 @@ function TaskRow({
         </td>
       )}
 
+      {visible('percentage') && (
+        <td {...td('percentage')}>
+          <EditableNumber
+            value={task.percentage}
+            max={100}
+            suffix="%"
+            ariaLabel={`Percentage of ${task.title}`}
+            onSave={(v) => onSave(task.id, 'percentage', v)}
+            {...cell('percentage')}
+          />
+        </td>
+      )}
+
+      {visible('consultsAllocated') && (
+        <td {...td('consultationsAllocated')}>
+          <EditableNumber
+            value={task.consultationsAllocated}
+            ariaLabel={`Consultations allocated for ${task.title}`}
+            onSave={(v) => onSave(task.id, 'consultationsAllocated', v)}
+            {...cell('consultationsAllocated')}
+          />
+        </td>
+      )}
+
+      {visible('consultsDone') && (
+        <td {...td('consultationsDone')}>
+          <EditableNumber
+            value={task.consultationsDone}
+            ariaLabel={`Consultations done for ${task.title}`}
+            onSave={(v) => onSave(task.id, 'consultationsDone', v)}
+            {...cell('consultationsDone')}
+          />
+        </td>
+      )}
+
+      {visible('callingsDone') && (
+        <td {...td('callingsDone')}>
+          <EditableNumber
+            value={task.callingsDone}
+            ariaLabel={`Callings done for ${task.title}`}
+            onSave={(v) => onSave(task.id, 'callingsDone', v)}
+            {...cell('callingsDone')}
+          />
+        </td>
+      )}
+
       {visible('reportTo') && (
         <td {...td('reportTo')}>
           <UserCell
@@ -1050,88 +1098,32 @@ function RowSelect({ className, ...props }: React.SelectHTMLAttributes<HTMLSelec
 }
 
 /**
- * Shows whether recorded work can be changed, and is the way to change that.
+ * Says whether the table is editable, and sends you to where that is decided.
  *
- * Deliberately a plain toggle rather than a hidden gesture: people need to see
- * that the table is read-only before they try to edit a cell and find it inert.
+ * A status, not a switch: unlocking lives in Settings now. It stays visible on
+ * the tracker because the alternative is discovering the table is read-only by
+ * clicking a cell and finding it inert, and then having nowhere obvious to go.
  */
-function LockButton({ unlocked, onAsk }: { unlocked: boolean; onAsk: () => void }) {
+function LockStatus({ unlocked }: { unlocked: boolean }) {
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => (unlocked ? storeLock() : onAsk())}
+    <Link
+      to="/settings?tab=work-tracker"
       title={
         unlocked
-          ? 'Recorded work can be edited. Click to lock again.'
-          : 'Recorded work is read-only. Click to unlock with the admin passcode.'
+          ? 'Recorded work can be edited. Lock it again in Settings.'
+          : 'Recorded work is read-only. Unlock it in Settings.'
       }
-      className={unlocked ? 'text-amber-600 dark:text-amber-400' : undefined}
+      className={cn(
+        'flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-sm',
+        'hover:bg-slate-100 dark:hover:bg-slate-800',
+        unlocked
+          ? 'text-amber-600 dark:text-amber-400'
+          : 'text-slate-400 dark:text-slate-500',
+      )}
     >
       {unlocked ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
       {unlocked ? 'Unlocked' : 'Locked'}
-    </Button>
-  );
-}
-
-/**
- * Asks for the admin passcode, checked server-side so the value is never in the
- * bundle. On success the tab holds it until it closes, and every edit presents
- * it — see src/lib/lock.ts for what that does and does not amount to.
- */
-function PasscodePrompt({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [passcode, setPasscode] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setPasscode('');
-      setError(null);
-    }
-  }, [open]);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!passcode.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await trackerApi.unlockSettings(passcode);
-      storeUnlock(passcode);
-      onClose();
-    } catch (err) {
-      setError((err as Error).message || 'That passcode is not right');
-      setPasscode('');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      size="md"
-      title="Unlock to edit"
-      description="Work that has already been recorded is read-only. The admin passcode reopens it for this tab."
-    >
-      <form onSubmit={submit}>
-        <Input
-          type="password"
-          autoFocus
-          value={passcode}
-          onChange={(e) => setPasscode(e.target.value)}
-          placeholder="Passcode"
-          aria-label="Admin passcode"
-        />
-        {error && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
-        <Button type="submit" className="mt-3 w-full" disabled={busy || !passcode.trim()}>
-          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          Unlock
-        </Button>
-      </form>
-    </Modal>
+    </Link>
   );
 }
 
@@ -1165,6 +1157,10 @@ function NewTaskRow({
     deadlineDate?: string | null;
     reportTo?: string | null;
     approverId?: string | null;
+    percentage?: number | null;
+    consultationsAllocated?: number | null;
+    consultationsDone?: number | null;
+    callingsDone?: number | null;
   }) => Promise<void>;
 }) {
   const [pickedUser, setPickedUser] = useState(defaultUser ?? users[0]?.id ?? '');
@@ -1177,6 +1173,10 @@ function NewTaskRow({
   const [deadlineDate, setDeadlineDate] = useState('');
   const [reportTo, setReportTo] = useState('');
   const [approverId, setApproverId] = useState('');
+  const [percentage, setPercentage] = useState('');
+  const [consultsAllocated, setConsultsAllocated] = useState('');
+  const [consultsDone, setConsultsDone] = useState('');
+  const [callingsDone, setCallingsDone] = useState('');
   const [error, setError] = useState<string | null>(null);
   const firstRef = useRef<HTMLInputElement>(null);
 
@@ -1191,6 +1191,10 @@ function NewTaskRow({
       setError('The deadline cannot be earlier than the due date');
       return;
     }
+    if (percentage !== '' && Number(percentage) > 100) {
+      setError('Percentage cannot be above 100');
+      return;
+    }
     setError(null);
     await onCreate({
       userId,
@@ -1201,6 +1205,12 @@ function NewTaskRow({
       deadlineDate: deadlineDate || null,
       reportTo: reportTo || null,
       approverId: approverId || null,
+      // Blank stays blank. A task with nothing to do with consultations should
+      // say nothing about them, which is not the same as saying zero.
+      percentage: percentage === '' ? null : Number(percentage),
+      consultationsAllocated: consultsAllocated === '' ? null : Number(consultsAllocated),
+      consultationsDone: consultsDone === '' ? null : Number(consultsDone),
+      callingsDone: callingsDone === '' ? null : Number(callingsDone),
     });
   };
 
@@ -1305,6 +1315,47 @@ function NewTaskRow({
               min={dueDate || undefined}
               onChange={(e) => setDeadlineDate(e.target.value)}
               aria-label="Deadline"
+            />
+          </td>
+        )}
+        {visible('percentage') && (
+          <td>
+            <RowInput
+              value={percentage}
+              inputMode="numeric"
+              placeholder="0-100"
+              aria-label="Percentage"
+              onChange={(e) => setPercentage(e.target.value.replace(/[^0-9]/g, ''))}
+            />
+          </td>
+        )}
+        {visible('consultsAllocated') && (
+          <td>
+            <RowInput
+              value={consultsAllocated}
+              inputMode="numeric"
+              aria-label="Consultations allocated"
+              onChange={(e) => setConsultsAllocated(e.target.value.replace(/[^0-9]/g, ''))}
+            />
+          </td>
+        )}
+        {visible('consultsDone') && (
+          <td>
+            <RowInput
+              value={consultsDone}
+              inputMode="numeric"
+              aria-label="Consultations done"
+              onChange={(e) => setConsultsDone(e.target.value.replace(/[^0-9]/g, ''))}
+            />
+          </td>
+        )}
+        {visible('callingsDone') && (
+          <td>
+            <RowInput
+              value={callingsDone}
+              inputMode="numeric"
+              aria-label="Callings done"
+              onChange={(e) => setCallingsDone(e.target.value.replace(/[^0-9]/g, ''))}
             />
           </td>
         )}

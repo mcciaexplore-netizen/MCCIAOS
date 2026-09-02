@@ -82,6 +82,10 @@ interface TaskRow {
   title: string;
   priority: string;
   status: string;
+  percentage: number | null;
+  consultations_allocated: number | null;
+  consultations_done: number | null;
+  callings_done: number | null;
   allocation_date: string | null;
   due_date: string | null;
   deadline_date: string | null;
@@ -104,6 +108,10 @@ interface TaskRow {
 // midnight and shifts the calendar day either side of UTC.
 const TASK_COLUMNS = `
   t.id, t.user_id, uo.name as user_name, t.title, t.priority, t.status,
+  t.percentage,
+  t.consultations_allocated,
+  t.consultations_done,
+  t.callings_done,
   to_char(t.allocation_date, 'YYYY-MM-DD') as allocation_date,
   to_char(t.due_date,        'YYYY-MM-DD') as due_date,
   to_char(t.deadline_date,   'YYYY-MM-DD') as deadline_date,
@@ -137,6 +145,10 @@ function toTask(row: TaskRow): Task {
     title: row.title,
     priority: row.priority as TaskPriority,
     status: row.status as TaskStatus,
+    percentage: row.percentage,
+    consultationsAllocated: row.consultations_allocated,
+    consultationsDone: row.consultations_done,
+    callingsDone: row.callings_done,
     allocationDate: row.allocation_date,
     dueDate: row.due_date,
     deadlineDate: row.deadline_date,
@@ -397,6 +409,10 @@ export interface TaskWriteInput {
   deadlineDate?: string | null;
   reportTo?: string | null;
   approverId?: string | null;
+  percentage?: number | null;
+  consultationsAllocated?: number | null;
+  consultationsDone?: number | null;
+  callingsDone?: number | null;
 }
 
 async function recordActivity(
@@ -442,9 +458,12 @@ export async function createTask(
   const rows = (await db.query(
     `insert into tasks
        (user_id, title, priority, status, allocation_date, due_date,
-        deadline_date, report_to, approver_id, completed_at)
+        deadline_date, report_to, approver_id, percentage,
+        consultations_allocated, consultations_done, callings_done,
+        completed_at)
      values ($1::uuid, $2, $3, $4, coalesce($5::date, ${TODAY}), $6::date,
-             $7::date, $8::uuid, $9::uuid,
+             $7::date, $8::uuid, $9::uuid, $10::smallint,
+             $11::int, $12::int, $13::int,
              case when $4 = 'completed' then now() end)
      returning id`,
     [
@@ -457,6 +476,10 @@ export async function createTask(
       input.deadlineDate ?? null,
       input.reportTo ?? null,
       input.approverId ?? null,
+      input.percentage ?? null,
+      input.consultationsAllocated ?? null,
+      input.consultationsDone ?? null,
+      input.callingsDone ?? null,
     ],
   )) as { id: string }[];
 
@@ -479,6 +502,10 @@ const PATCHABLE: Record<string, string> = {
   deadlineDate: 'deadline_date',
   reportTo: 'report_to',
   approverId: 'approver_id',
+  percentage: 'percentage',
+  consultationsAllocated: 'consultations_allocated',
+  consultationsDone: 'consultations_done',
+  callingsDone: 'callings_done',
 };
 
 const CASTS: Record<string, string> = {
@@ -488,6 +515,10 @@ const CASTS: Record<string, string> = {
   allocation_date: '::date',
   due_date: '::date',
   deadline_date: '::date',
+  percentage: '::smallint',
+  consultations_allocated: '::int',
+  consultations_done: '::int',
+  callings_done: '::int',
 };
 
 export type TaskPatch = Partial<TaskWriteInput>;
@@ -622,6 +653,74 @@ export async function deleteTask(
     { field: 'deleted', oldValue: rows[0].title, newValue: null },
   ]);
   return true;
+}
+
+/**
+ * How much work each person is carrying, for the Settings roster.
+ *
+ * Counts the live rows only. Removed work is not somebody's workload, and
+ * offering to "delete all 12" when 8 of them are already gone would be a lie
+ * about what the button does.
+ */
+export async function taskCountsByUser(): Promise<Record<string, number>> {
+  const db = requireSql();
+  const rows = (await db.query(
+    `select t.user_id, count(*)::int as n
+       from tasks t
+      where ${LIVE}
+      group by t.user_id`,
+  )) as { user_id: string; n: number }[];
+  return Object.fromEntries(rows.map((r) => [r.user_id, r.n]));
+}
+
+/**
+ * Removes every live task belonging to one person, in one go.
+ *
+ * Hides rather than destroys, exactly like removing one task, so a bulk clear
+ * made in error is as recoverable as a single one — which matters more here,
+ * not less, because the mistake is larger.
+ */
+export async function deleteTasksForUser(
+  userId: string,
+  actorId: string | null,
+): Promise<number> {
+  if (!UUID_RE.test(userId)) return 0;
+  const db = requireSql();
+  const rows = (await db.query(
+    `update tasks set deleted_at = now()
+      where user_id = $1::uuid and deleted_at is null
+      returning id, title`,
+    [userId],
+  )) as { id: string; title: string }[];
+
+  for (const r of rows) {
+    await recordActivity(r.id, actorId, [
+      { field: 'deleted', oldValue: r.title, newValue: null },
+    ]);
+  }
+  return rows.length;
+}
+
+/** Puts back everything removed from one person in the last few minutes. */
+export async function restoreTasksForUser(
+  userId: string,
+  since: Date,
+  actorId: string | null,
+): Promise<number> {
+  if (!UUID_RE.test(userId)) return 0;
+  const db = requireSql();
+  const rows = (await db.query(
+    `update tasks set deleted_at = null
+      where user_id = $1::uuid and deleted_at is not null and deleted_at >= $2
+      returning id, title`,
+    [userId, since.toISOString()],
+  )) as { id: string; title: string }[];
+  for (const r of rows) {
+    await recordActivity(r.id, actorId, [
+      { field: 'restored', oldValue: null, newValue: r.title },
+    ]);
+  }
+  return rows.length;
 }
 
 /** Puts back a task that was removed. Undo, and the reason hiding beats deleting. */

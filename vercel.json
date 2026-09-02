@@ -2,5 +2,11 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/[...path]" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    {
+      "path": "/api/export/daily",
+      "schedule": "30 12 * * *"
+    }
   ]
 }

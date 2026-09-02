@@ -29,6 +29,13 @@ import {
   deactivateUser,
   deleteTask,
   restoreTask,
+  deleteTasksForUser,
+  restoreTasksForUser,
+  taskCountsByUser,
+} from './work-tracker.js';
+import { runDailyExport } from './daily-export.js';
+import { SheetsError } from './google-sheets.js';
+import {
   getActivity,
   getAtRisk,
   getTabCounts,
@@ -336,6 +343,8 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   if (
     pathname.startsWith('/api/tasks') ||
     pathname.startsWith('/api/users') ||
+    pathname === '/api/task-counts' ||
+    pathname === '/api/export/daily' ||
     pathname === '/api/summary' ||
     pathname === '/api/today' ||
     pathname === '/api/at-risk'
@@ -757,7 +766,78 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
           return json(422, { error: 'Validation failed', issues: parsed.error.issues });
         return json(201, { task: await createTask(parsed.data, actor) });
       }
+
+      // Bulk clear for one person, from the Settings roster. Scoped to a named
+      // user on purpose: there is no "delete everything" here, because the one
+      // button capable of emptying the whole tracker should not sit next to
+      // nine that each empty a single person's.
+      if (method === 'DELETE') {
+        const target = query.get('user');
+        if (!target) {
+          return json(400, {
+            error: 'Name whose work to clear, with ?user=<id>. There is no clear-all.',
+          });
+        }
+        if (!holdsPasscode(req)) {
+          return json(403, {
+            error: 'Clearing somebody\u2019s work needs the admin passcode.',
+            locked: ['tasks'],
+          });
+        }
+        const removed = await deleteTasksForUser(target, actor);
+        return json(200, { removed });
+      }
       return json(405, { error: 'Method not allowed' });
+    }
+
+    // ---- /api/tasks/restore-bulk -------------------------------------------
+    // Undo for the bulk clear above.
+    if (pathname === '/api/tasks/restore-bulk') {
+      if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+      if (!holdsPasscode(req)) {
+        return json(403, { error: 'Restoring work needs the admin passcode.' });
+      }
+      const body = (req.body ?? {}) as { user?: unknown; since?: unknown };
+      const target = typeof body.user === 'string' ? body.user : '';
+      const since = typeof body.since === 'string' ? new Date(body.since) : null;
+      if (!target || !since || Number.isNaN(since.getTime())) {
+        return json(400, { error: 'Needs a user and the time the clear happened' });
+      }
+      const restored = await restoreTasksForUser(target, since, actor);
+      return json(200, { restored });
+    }
+
+    // ---- /api/export/daily -------------------------------------------------
+    // The 18:00 IST write to Google Sheets. Reachable two ways: Vercel Cron,
+    // which presents CRON_SECRET, and a person pressing "Run now" in Settings,
+    // who presents the admin passcode. Never open — it writes to a document
+    // outside this app.
+    if (pathname === '/api/export/daily') {
+      if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+      const secret = process.env.CRON_SECRET?.trim();
+      const presented =
+        req.headers['x-cron-secret'] ??
+        (req.headers['authorization'] ?? '').replace(/^Bearer\s+/i, '');
+      const byCron = Boolean(secret) && presented === secret;
+      if (!byCron && !holdsPasscode(req)) {
+        return json(403, {
+          error: 'The daily export needs the admin passcode, or the cron secret.',
+        });
+      }
+      try {
+        const force = query.get('force') === 'true';
+        return json(200, await runDailyExport({ force }));
+      } catch (err) {
+        if (err instanceof SheetsError) return json(err.status, { error: err.message });
+        throw err;
+      }
+    }
+
+    // ---- /api/task-counts --------------------------------------------------
+    // Live task count per person, for the Settings roster.
+    if (pathname === '/api/task-counts') {
+      if (method !== 'GET') return json(405, { error: 'Method not allowed' });
+      return json(200, { counts: await taskCountsByUser() });
     }
 
     // ---- /api/tasks/:id[/approve] ------------------------------------------

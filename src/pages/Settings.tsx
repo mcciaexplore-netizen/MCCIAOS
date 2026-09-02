@@ -11,6 +11,9 @@ import {
   Check,
   Loader2,
   Lock,
+  LockOpen,
+  Upload,
+  ListChecks,
   Users,
   Megaphone,
   Link2,
@@ -32,7 +35,8 @@ import { useToast } from '@/components/Toast';
 import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
 import { api } from '@/lib/api';
-import { unlock as storeUnlock } from '@/lib/lock';
+import { lock as storeLock, unlock as storeUnlock } from '@/lib/lock';
+import { useUnlocked } from '@/hooks/useUnlocked';
 import { trackerApi } from '@/lib/workTrackerApi';
 import type { UserInput, UserUpdateInput } from '@/schemas/workTracker';
 import { cn } from '@/lib/utils';
@@ -88,7 +92,7 @@ interface Group {
   editors: Editor[];
   danger?: DangerAction;
   /** Rendered by a dedicated component rather than the generic list editors. */
-  custom?: 'team';
+  custom?: 'team' | 'workTracker';
 }
 
 const GROUPS: Group[] = [
@@ -99,6 +103,14 @@ const GROUPS: Group[] = [
     blurb: 'Who work can be assigned to.',
     editors: [],
     custom: 'team',
+  },
+  {
+    id: 'work-tracker',
+    label: 'Work Tracker',
+    icon: ListChecks,
+    blurb: 'Whether recorded work can be edited, and clearing what somebody is carrying.',
+    editors: [],
+    custom: 'workTracker',
   },
   {
     id: 'social',
@@ -324,6 +336,7 @@ function SettingsInner() {
           <p className="mb-3 text-sm text-slate-500">{tab.blurb}</p>
           <div className="space-y-4">
             {tab.custom === 'team' && <TeamRoster />}
+            {tab.custom === 'workTracker' && <WorkTrackerAdmin />}
             {tab.editors.map((e) =>
               e.kind === 'toned' ? (
                 <TonedListEditor
@@ -677,6 +690,250 @@ function TonedListEditor({
 // Backed by the `users` table, which is the single source for the roster. The
 // old list of names on the Settings record is gone: it meant the same team
 // existed in two places that could drift apart.
+
+/**
+ * Work Tracker administration.
+ *
+ * Two things live here, and both are here rather than on the tracker itself
+ * because both are admin acts: whether recorded work can be edited at all, and
+ * clearing out everything one person is carrying.
+ */
+function WorkTrackerAdmin() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const unlocked = useUnlocked();
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  const usersQuery = useQuery({
+    queryKey: ['tracker-users', 'all'],
+    queryFn: () => trackerApi.users(false),
+  });
+  const countsQuery = useQuery({
+    queryKey: ['task-counts'],
+    queryFn: () => trackerApi.taskCounts(),
+  });
+
+  const users = (usersQuery.data?.users ?? []).filter((u) => u.isActive);
+  const counts = countsQuery.data?.counts ?? {};
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['task-counts'] });
+    qc.invalidateQueries({ queryKey: ['tasks'] });
+  };
+
+  const restore = useMutation({
+    mutationFn: ({ id, since }: { id: string; since: string }) =>
+      trackerApi.restoreTasksFor(id, since),
+    onSuccess: (r) => {
+      refresh();
+      toast(`Put back ${r.restored} task${r.restored === 1 ? '' : 's'}`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const [exportResult, setExportResult] = useState<Awaited<
+    ReturnType<typeof trackerApi.runDailyExport>
+  > | null>(null);
+
+  const exportNow = useMutation({
+    mutationFn: (force: boolean) => trackerApi.runDailyExport(force),
+    onSuccess: (r) => {
+      setExportResult(r);
+      toast(`Wrote ${r.written} row${r.written === 1 ? '' : 's'} to the sheet`);
+    },
+    onError: (err: Error) => {
+      setExportResult(null);
+      toast(err.message, 'error');
+    },
+  });
+
+  const clear = useMutation({
+    mutationFn: (id: string) => trackerApi.clearTasksFor(id),
+    onSuccess: (r, id) => {
+      // Captured before the request so the undo has a window to match on. The
+      // bulk clear hides rather than destroys, so this is a real undo.
+      const since = new Date(Date.now() - 60_000).toISOString();
+      refresh();
+      setConfirming(null);
+      toast(
+        `Cleared ${r.removed} task${r.removed === 1 ? '' : 's'}`,
+        'success',
+        r.removed > 0
+          ? { label: 'Undo', onAct: () => restore.mutate({ id, since }) }
+          : undefined,
+      );
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* ---- the lock ---- */}
+      <Card className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+              Editing recorded work
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {unlocked
+                ? 'Unlocked. Any filled field on the Work Tracker can be changed, and tasks can be deleted.'
+                : 'Locked. A field that already holds a value is read-only, and tasks cannot be deleted.'}
+            </p>
+            <p className="mt-2 text-xs text-slate-400">
+              Reaching this page unlocked editing, because it is the same passcode.
+              Lock it again when you are done.
+            </p>
+          </div>
+          <Button
+            variant={unlocked ? 'secondary' : 'primary'}
+            size="sm"
+            onClick={() => {
+              if (unlocked) {
+                storeLock();
+                toast('Recorded work is locked again');
+              }
+            }}
+            disabled={!unlocked}
+            className="shrink-0"
+          >
+            {unlocked ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+            {unlocked ? 'Lock again' : 'Locked'}
+          </Button>
+        </div>
+      </Card>
+
+      {/* ---- the daily sheet ---- */}
+      <Card className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+              Daily export to Google Sheets
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Every evening at 18:00 IST each person&rsquo;s work is appended to
+              their own tab, creating the tab if it does not exist yet. Running
+              it again on a day already written changes nothing, so pressing this
+              after the scheduled run is safe.
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!unlocked || exportNow.isPending}
+            onClick={() => exportNow.mutate(false)}
+            title={unlocked ? 'Write today to the sheet now' : 'Unlock above first'}
+            className="shrink-0"
+          >
+            {exportNow.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4" />
+            )}
+            Run now
+          </Button>
+        </div>
+        {exportResult && (
+          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800/60">
+            <p className="font-medium text-slate-700 dark:text-slate-200">
+              {exportResult.day}: {exportResult.written} row
+              {exportResult.written === 1 ? '' : 's'} written
+              {exportResult.skipped > 0 && `, ${exportResult.skipped} skipped`}
+            </p>
+            <ul className="mt-1 space-y-0.5 text-slate-500 dark:text-slate-400">
+              {exportResult.people.map((p) => (
+                <li key={p.name}>
+                  {p.name} &rarr; {p.tab}
+                  {p.created && ' (tab created)'}
+                  {p.skipped ? ` — skipped, ${p.skipped}` : ` — ${p.tasks} task${p.tasks === 1 ? '' : 's'}`}
+                </li>
+              ))}
+            </ul>
+            {exportResult.skipped > 0 && (
+              <button
+                onClick={() => exportNow.mutate(true)}
+                className="mt-2 text-brand-600 hover:underline dark:text-brand-400"
+              >
+                Write today again anyway
+              </button>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* ---- bulk clear ---- */}
+      <Card className="p-4">
+        <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+          Clear somebody&rsquo;s work
+        </p>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Removes every task a person is carrying. Removal hides rather than
+          destroys, so this can be undone — from the toast straight afterwards,
+          or with <code className="text-[11px]">scripts/restore-work-tracker.mjs</code>.
+        </p>
+        <p className="mt-1 text-xs text-slate-400">
+          {total} task{total === 1 ? '' : 's'} across the team.
+        </p>
+
+        {!unlocked && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+            Locked. Unlock above before clearing anybody&rsquo;s work.
+          </p>
+        )}
+
+        <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+          {users.map((u) => {
+            const n = counts[u.id] ?? 0;
+            const asking = confirming === u.id;
+            return (
+              <li key={u.id} className="flex items-center gap-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-200">
+                  {u.name}
+                </span>
+                <span className="shrink-0 text-xs tabular-nums text-slate-400">
+                  {n} task{n === 1 ? '' : 's'}
+                </span>
+                {asking ? (
+                  <span className="flex shrink-0 items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={clear.isPending}
+                      onClick={() => clear.mutate(u.id)}
+                    >
+                      {clear.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Clear {n}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                      Cancel
+                    </Button>
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!unlocked || n === 0}
+                    onClick={() => setConfirming(u.id)}
+                    title={
+                      n === 0
+                        ? `${u.name} has no work to clear`
+                        : `Clear all ${n} of ${u.name}'s tasks`
+                    }
+                    className="shrink-0"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clear
+                  </Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+    </div>
+  );
+}
 
 function TeamRoster() {
   const qc = useQueryClient();

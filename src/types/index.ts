@@ -225,6 +225,16 @@ export interface Task {
   /** YYYY-MM-DD. Hard limit; never earlier than dueDate. */
   deadlineDate: string | null;
 
+  /**
+   * The four numbers a task carries. All nullable: a task with nothing to do
+   * with consultations should say nothing about them, and "none yet" (0) is a
+   * different statement from "not applicable" (null).
+   */
+  percentage: number | null;
+  consultationsAllocated: number | null;
+  consultationsDone: number | null;
+  callingsDone: number | null;
+
   reportTo: string | null;
   reportToName: string | null;
   approverId: string | null;

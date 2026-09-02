@@ -164,6 +164,49 @@ export const trackerApi = {
   },
 
   /**
+   * Writes today's work to the Google Sheet now, rather than waiting for the
+   * 18:00 run. `force` rewrites a day that has already been written, which is
+   * what you want after correcting a task late in the day.
+   */
+  runDailyExport(force = false) {
+    return request<{
+      day: string;
+      written: number;
+      skipped: number;
+      people: { name: string; tab: string; tasks: number; created: boolean; skipped?: string }[];
+    }>(`/api/export/daily${force ? '?force=true' : ''}`, {
+      method: 'POST',
+      authorised: true,
+    });
+  },
+
+  /** Live task count per person, for the Settings roster. */
+  taskCounts() {
+    return request<{ counts: Record<string, number> }>('/api/task-counts');
+  },
+
+  /**
+   * Clears everything one person is carrying. Hides rather than destroys, like
+   * removing a single task, so a bulk clear made in error is recoverable —
+   * which matters more here, not less, because the mistake is larger.
+   */
+  clearTasksFor(userId: string, actor?: string) {
+    return request<{ removed: number }>(
+      `/api/tasks?${qs({ user: userId, actor })}`,
+      { method: 'DELETE', authorised: true },
+    );
+  },
+
+  /** Undo for the bulk clear: puts back what it removed. */
+  restoreTasksFor(userId: string, since: string, actor?: string) {
+    return request<{ restored: number }>(`/api/tasks/restore-bulk?${qs({ actor })}`, {
+      method: 'POST',
+      body: JSON.stringify({ user: userId, since }),
+      authorised: true,
+    });
+  },
+
+  /**
    * Puts back a task that was removed. Removal hides the row rather than
    * destroying it, so this is a real undo rather than a re-creation.
    */

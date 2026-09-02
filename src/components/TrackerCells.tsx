@@ -279,6 +279,113 @@ export function EditableText({
   );
 }
 
+/**
+ * A number cell: progress, consultation counts, call counts.
+ *
+ * Empty is a real value and means "not applicable" — a task with nothing to do
+ * with consultations should say nothing about them, which is a different
+ * statement from "none yet" (0). So blanking the field stores null rather than
+ * reverting, unlike EditableText where an empty title is simply invalid.
+ *
+ * Out-of-range input is refused on the spot rather than sent and bounced: the
+ * database holds percentage to 0-100 and the counts to non-negative, and a
+ * round trip to be told so is a worse way to learn it.
+ */
+export function EditableNumber({
+  value,
+  onSave,
+  saving,
+  error,
+  disabled,
+  min = 0,
+  max,
+  suffix,
+  ariaLabel,
+}: CellProps & {
+  value: number | null;
+  onSave: (next: number | null) => void;
+  min?: number;
+  max?: number;
+  suffix?: string;
+  ariaLabel: string;
+}) {
+  const [draft, setDraft] = useState(value === null ? '' : String(value));
+  const committed = useRef(value);
+  const [local, setLocal] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(value === null ? '' : String(value));
+    committed.current = value;
+    setLocal(null);
+  }, [value]);
+
+  const commit = () => {
+    const text = draft.trim();
+    if (text === '') {
+      if (committed.current === null) return;
+      committed.current = null;
+      setLocal(null);
+      onSave(null);
+      return;
+    }
+    const n = Number(text);
+    if (!Number.isInteger(n)) {
+      setLocal('Whole numbers only');
+      return;
+    }
+    if (n < min) {
+      setLocal(`Cannot be below ${min}`);
+      return;
+    }
+    if (max !== undefined && n > max) {
+      setLocal(`Cannot be above ${max}`);
+      return;
+    }
+    setLocal(null);
+    if (n === committed.current) return;
+    committed.current = n;
+    onSave(n);
+  };
+
+  return (
+    <CellShell saving={saving} error={local ?? error}>
+      <span className="flex min-w-0 items-center">
+        <input
+          value={draft}
+          disabled={disabled}
+          inputMode="numeric"
+          aria-label={ariaLabel}
+          data-cell
+          onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+          onBlur={commit}
+          onKeyDown={(e: ReactKeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commit();
+              e.currentTarget.blur();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setDraft(committed.current === null ? '' : String(committed.current));
+              setLocal(null);
+              e.currentTarget.blur();
+            }
+          }}
+          className={cn(cellBase, 'tabular-nums')}
+        />
+        {suffix && draft !== '' && (
+          <span
+            aria-hidden
+            className="pointer-events-none -ml-1 pr-1 text-sm"
+            style={{ color: 'var(--n200)' }}
+          >
+            {suffix}
+          </span>
+        )}
+      </span>
+    </CellShell>
+  );
+}
+
 // ---- Icon-fronted select --------------------------------------------------
 
 /**

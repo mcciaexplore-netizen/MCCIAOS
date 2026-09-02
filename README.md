@@ -163,6 +163,16 @@ Title's floor has to be the table's `minWidth` rather than the cell's, since a
 fixed layout ignores a cell's own minimum — otherwise a 1280px window crushed
 the one column carrying the actual sentence down to "Wh.".
 
+**The four numbers.** Alongside the dates each task carries `percentage`
+(0-100), `consultations_allocated`, `consultations_done` and `callings_done`.
+All four are nullable, and that is the point: a task with nothing to do with
+consultations should say nothing about them, which is a different statement from
+"none yet" (0). Percentage is held to 0-100 and the counts to non-negative in
+Postgres; `consultations_done` is deliberately **not** capped by `allocated`,
+because doing more than was formally handed out is a normal thing to record and
+a CHECK that rejects the truth teaches people to enter something false.
+Migration: `db/work-tracker-metrics.sql`.
+
 **Recorded work is read-only.** A field that already holds a value cannot be
 changed without the admin passcode, and neither can deleting a task. A field
 that is still empty stays editable — filling in a blank adds information, it
@@ -171,9 +181,20 @@ would only teach them to leave the app unlocked all day. Note that status and
 priority always hold a value, so every progress update needs the passcode; that
 is the intended trade and it is the main day-to-day cost of the freeze.
 
-The lock is one gate shared with the Settings page: unlocking either unlocks
-both, for the life of the tab. The toolbar shows **Locked** / **Unlocked** so
-the state is visible before somebody clicks a cell and finds it inert.
+The switch lives in **Settings → Work Tracker**, together with the per-person
+bulk clear. The tracker itself shows only a **Locked** / **Unlocked** status that
+links there — a status, not a switch, because the alternative is discovering the
+table is read-only by clicking a cell and finding it inert with nowhere obvious
+to go. Reaching Settings at all requires the passcode, so arriving there unlocks
+editing; **Lock again** puts it back without leaving the page.
+
+**Clearing one person's work.** Settings → Work Tracker lists everybody with
+what they are carrying and a Clear button each. It hides rather than destroys,
+exactly like removing a single task, so a bulk clear made in error is as
+recoverable as a single one — which matters more here, not less, because the
+mistake is larger. `DELETE /api/tasks` requires `?user=<id>`: there is no
+clear-all, because the one button capable of emptying the whole tracker should
+not sit next to nine that each empty a single person's.
 
 It is enforced in the API, not only on screen — every edit carries the passcode
 in an `x-settings-passcode` header and `server/handlers.ts` refuses the ones
@@ -367,3 +388,47 @@ restores each task under its original id, so running it twice is harmless. The
 roster in `users` is left alone either way: people are managed on the Settings
 page, and deleting them would orphan anything restored afterwards. `backups/` is
 gitignored.
+
+
+## Daily export to Google Sheets
+
+At 18:00 IST every day each person's work is appended to their own tab of the
+MCCIA OS Task sheet, creating the tab if it does not exist. Tabs are matched by
+name, case-insensitively and ignoring stray spaces, because a sheet maintained
+by hand will have "Aarushi " in it sooner or later and a second tab for the same
+person would split their history in two. Somebody with nothing on is skipped
+entirely — a tab of empty dated rows is worse than no entry for a quiet day.
+
+Running twice on one day writes once: each tab's last date is read first, and a
+day already present is skipped. **Settings → Work Tracker → Run now** does the
+same thing on demand and offers to write again anyway, which is what you want
+after correcting a task late in the day.
+
+**Setup.** Three environment variables, and the sheet shared with the service
+account:
+
+| Variable | Where it comes from |
+| --- | --- |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | the service account's `client_email` |
+| `GOOGLE_PRIVATE_KEY` | its `private_key`, newlines escaped as `\n` |
+| `SHEETS_SPREADSHEET_ID` | the id in the sheet's URL |
+| `CRON_SECRET` | any long random string; Vercel Cron presents it |
+
+1. Google Cloud console → new project (or an existing one) → enable the
+   **Google Sheets API**.
+2. Create a **service account**, then a **JSON key** for it.
+3. Open the spreadsheet → Share → paste the service account's address → **Editor**.
+   Without this every call returns 403, and the error says so by name.
+4. Put the four variables in Vercel's project settings.
+
+The schedule is in `vercel.json` as `30 12 * * *` — 12:30 UTC is 18:00 IST.
+Vercel Cron runs in UTC and has no timezone setting, so the offset is baked into
+the expression; if India ever changed its offset this line would need changing
+with it. On Vercel's Hobby plan crons fire approximately, not to the minute.
+
+The client is `server/google-sheets.ts` — a signed JWT and three REST calls
+rather than the `googleapis` package, which is tens of megabytes for the same
+three endpoints. `server/daily-export.ts` builds the rows.
+
+Nothing here is required: with none of the variables set the app runs exactly as
+before, and the endpoint answers 501 explaining what is missing.

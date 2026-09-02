@@ -22,6 +22,29 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a YYYY-MM-DD date')
 const uuid = z.string().uuid('Not a valid id');
 const nullableDate = isoDate.nullable().optional();
 
+/**
+ * The metric fields. Nullable rather than defaulted to 0: a task that has
+ * nothing to do with consultations should say nothing about them, and "none
+ * yet" is a different statement from "not applicable".
+ *
+ * Accepts a number or a numeric string, because an <input type="number"> hands
+ * back "" for empty and "3" for three, and an empty cell means null.
+ */
+const count = z.preprocess(
+  (v) => (v === '' || v === null || v === undefined ? null : v),
+  z.coerce.number().int('Whole numbers only').min(0, 'Cannot be negative').nullable(),
+).optional();
+
+const percent = z.preprocess(
+  (v) => (v === '' || v === null || v === undefined ? null : v),
+  z.coerce
+    .number()
+    .int('Whole numbers only')
+    .min(0, 'Cannot be below 0')
+    .max(100, 'Cannot be above 100')
+    .nullable(),
+).optional();
+
 const taskFields = z.object({
   userId: uuid,
   title: z.string().trim().min(1, 'Give the work a title'),
@@ -32,6 +55,10 @@ const taskFields = z.object({
   deadlineDate: nullableDate,
   reportTo: uuid.nullable().optional(),
   approverId: uuid.nullable().optional(),
+  percentage: percent,
+  consultationsAllocated: count,
+  consultationsDone: count,
+  callingsDone: count,
 });
 
 type TaskFields = Partial<z.infer<typeof taskFields>>;
