@@ -33,7 +33,7 @@ import {
   formatJiraDate,
 } from '@/components/TrackerCells';
 import { ConsultationsTable } from '@/components/ConsultationsTable';
-import { SharedWorkButton, TeamOnTask } from '@/components/TeamOnTask';
+import { TeamOnTask, WorkGroupBlock } from '@/components/TeamOnTask';
 import { useToast } from '@/components/Toast';
 import { trackerApi, type TabKey } from '@/lib/workTrackerApi';
 import {
@@ -584,7 +584,13 @@ export default function WorkTracker() {
           {/* Beside the person picker, because it answers the question that
               picker cannot: the table lists a task once, under its owner, so a
               collaborator's involvement is invisible until you open that row. */}
-          {view === 'work' && <SharedWorkButton user={user} />}
+          {view === 'work' && (
+            <WorkGroupBlock
+              user={user}
+              users={users}
+              onChanged={() => qc.invalidateQueries({ queryKey: ['tasks'] })}
+            />
+          )}
           {/* One control, doing both jobs: it narrows the table to one person
               and names who new work is filed under. Left on Everyone the table
               shows the whole team, which is what it opens on. */}

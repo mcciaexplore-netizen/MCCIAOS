@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Loader2, Users2 } from 'lucide-react';
 import { Avatar, AvatarStack } from '@/components/TrackerCells';
-import { Button } from '@/components/ui';
+import { Select } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { trackerApi } from '@/lib/workTrackerApi';
 import { cn } from '@/lib/utils';
@@ -150,67 +150,152 @@ export function TeamOnTask({
 }
 
 /**
- * The shared-work panel, opened from the toolbar.
+ * The group block: pick a piece of work, see who is on it.
  *
- * Answers one question the table cannot at a glance: which work has more than
- * one person on it, and who. The table lists a task once, under its owner, so a
- * collaborator's involvement is invisible until you look at that row.
+ * Replaces a chip that only counted shared work. The table answers "what is
+ * everyone doing"; this answers the other direction — "who is on this" — for
+ * one piece of work at a time, and lets the team be changed from the same
+ * place. A task is listed once, under its owner, so without this a
+ * collaborator's involvement is invisible unless you happen to open that row.
  */
-export function SharedWorkButton({ user }: { user: string }) {
+export function WorkGroupBlock({
+  user,
+  users,
+  onChanged,
+}: {
+  /** The person the table is filtered to, or '' for everyone. */
+  user: string;
+  users: User[];
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState('');
   const [open, setOpen] = useState(false);
-  // Sits in the toolbar, not in a sticky cell, so nothing above it needs
-  // telling when it opens.
-  const show = setOpen;
-  const query = useQuery({
-    queryKey: ['shared-work', user],
-    queryFn: () => trackerApi.sharedWork(user || undefined),
-    staleTime: 30_000,
-  });
-  const shared = query.data?.shared ?? [];
 
-  if (shared.length === 0) return null;
+  const query = useQuery({
+    queryKey: ['tasks', user, 'group'],
+    queryFn: () => trackerApi.tasks({ user: user || undefined, tab: 'all' }),
+    staleTime: 15_000,
+  });
+  const tasks = query.data?.tasks ?? [];
+  const task = tasks.find((t) => t.id === selected);
+
+  const save = useMutation({
+    mutationFn: (ids: string[]) => trackerApi.setMembers(task!.id, ids),
+    onSuccess: (r) => {
+      // Write the server's answer straight into the cache rather than waiting
+      // for a refetch. Relying on the round trip left the count a step behind:
+      // adding somebody showed no change until the *next* click, and the click
+      // after that computed its toggle from the stale set.
+      qc.setQueryData<{ tasks: Task[] }>(['tasks', user, 'group'], (prev) =>
+        prev
+          ? { tasks: prev.tasks.map((t) => (t.id === r.task.id ? r.task : t)) }
+          : prev,
+      );
+      onChanged();
+      const n = r.task.members.length + 1;
+      toast(n === 1 ? 'Just one person on this' : `${n} people on this`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  if (tasks.length === 0) return null;
+
+  const owner = task ? users.find((u) => u.id === task.userId) : undefined;
+  const people = task
+    ? [
+        { name: task.userName, colour: owner?.colour ?? null },
+        ...task.members.map((m) => ({ name: m.name, colour: m.colour })),
+      ]
+    : [];
+  const memberIds = new Set(task?.members.map((m) => m.id) ?? []);
+
+  const toggle = (id: string) => {
+    const next = new Set(memberIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    save.mutate([...next]);
+  };
 
   return (
-    <span className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => show(!open)}
-        aria-expanded={open}
-        title="Work more than one person is on"
-      >
-        <Users2 className="h-4 w-4" />
-        {shared.length} shared
-      </Button>
+    <span className="relative flex items-center gap-1.5">
+      <span className="w-44">
+        <label htmlFor="work-group" className="sr-only">
+          Show who is working on a piece of work
+        </label>
+        <Select
+          id="work-group"
+          value={selected}
+          onChange={(e) => {
+            setSelected(e.target.value);
+            setOpen(false);
+          }}
+          title="Pick a piece of work to see who is on it"
+          className="py-1.5 text-sm"
+        >
+          <option value="">Group…</option>
+          {tasks.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.title}
+            </option>
+          ))}
+        </Select>
+      </span>
 
-      {open && (
+      {task && (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={`${people.length} working on ${task.title}. Change who is on it.`}
+          data-group-team
+          title={`${people.length} on "${task.title}": ${people.map((p) => p.name).join(', ')}`}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+        >
+          <AvatarStack people={people} max={4} />
+          <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+            {people.length}
+          </span>
+        </button>
+      )}
+
+      {open && task && (
         <>
           <button
             aria-hidden
             tabIndex={-1}
-            onClick={() => show(false)}
+            onClick={() => setOpen(false)}
             className="fixed inset-0 z-40 cursor-default"
           />
-          <div className="absolute right-0 top-full z-50 mt-1 max-h-80 w-80 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-            <p className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-slate-400">
-              Worked on by more than one person
+          <div className="absolute right-0 top-full z-50 mt-1 max-h-72 w-64 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+            <p className="truncate px-3 py-1.5 text-[11px] uppercase tracking-wide text-slate-400">
+              Working on {task.title}
             </p>
-            {shared.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 px-3 py-2">
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-slate-700 dark:text-slate-200">
-                    {s.title}
+            {/* The owner cannot be unticked: removing them would leave the work
+                belonging to nobody. Change that in the table's Name cell. */}
+            <span className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-400">
+              <Avatar name={task.userName} colour={owner?.colour} size={20} />
+              <span className="min-w-0 flex-1 truncate">{task.userName}</span>
+              <span className="text-[11px]">owner</span>
+            </span>
+            {users
+              .filter((u) => u.id !== task.userId)
+              .map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => toggle(u.id)}
+                  disabled={save.isPending}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
+                  <Avatar name={u.name} colour={u.colour} size={20} />
+                  <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">
+                    {u.name}
                   </span>
-                  <span className="block truncate text-[11px] text-slate-400">
-                    {s.people.map((p) => p.name).join(', ')}
-                  </span>
-                </span>
-                <AvatarStack people={s.people} max={4} />
-                <span className="shrink-0 text-xs tabular-nums text-slate-400">
-                  {s.people.length}
-                </span>
-              </div>
-            ))}
+                  {memberIds.has(u.id) && (
+                    <Check className="h-4 w-4 shrink-0 text-brand-600" />
+                  )}
+                </button>
+              ))}
           </div>
         </>
       )}
