@@ -56,19 +56,21 @@ const TABS: { key: TabKey; label: string }[] = [
  * Ten columns, in the order the spec gives. Name is the only sticky one; the
  * rest scroll horizontally past it.
  *
- * Title is given a fixed width rather than flexing: a sticky neighbour needs a
- * known left offset, which a flexible column cannot provide.
+ * Widths are measured from the real content — the longest name with its avatar,
+ * a date like "01 Sept", the widest lozenge — plus room for the header label,
+ * so nothing is cut off. Title carries no fixed width: it takes whatever space
+ * is left over, and holds a floor so it stays readable on a narrow screen.
  */
 const COLUMNS = [
-  { key: 'name', label: 'Name', width: 160, sticky: true, sort: 'name' },
-  { key: 'title', label: 'Title', width: 340, sticky: false, sort: 'title' },
-  { key: 'priority', label: 'Priority', width: 110, sticky: false, sort: '' },
-  { key: 'status', label: 'Status', width: 120, sticky: false, sort: '' },
-  { key: 'allocation', label: 'Allocation', width: 110, sticky: false, sort: 'allocation' },
-  { key: 'due', label: 'Due', width: 110, sticky: false, sort: 'due' },
-  { key: 'deadline', label: 'Deadline', width: 110, sticky: false, sort: 'deadline' },
-  { key: 'reportTo', label: 'Reports to', width: 150, sticky: false, sort: '' },
-  { key: 'approver', label: 'Approver', width: 150, sticky: false, sort: '' },
+  { key: 'name', label: 'Name', width: 132, sticky: true, flex: false, sort: 'name' },
+  { key: 'title', label: 'Title', width: 360, sticky: false, flex: true, sort: 'title' },
+  { key: 'priority', label: 'Priority', width: 92, sticky: false, flex: false, sort: '' },
+  { key: 'status', label: 'Status', width: 106, sticky: false, flex: false, sort: '' },
+  { key: 'allocation', label: 'Allocation', width: 96, sticky: false, flex: false, sort: 'allocation' },
+  { key: 'due', label: 'Due', width: 86, sticky: false, flex: false, sort: 'due' },
+  { key: 'deadline', label: 'Deadline', width: 96, sticky: false, flex: false, sort: 'deadline' },
+  { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
+  { key: 'approver', label: 'Approver', width: 132, sticky: false, flex: false, sort: '' },
 ] as const;
 
 type ColumnKey = (typeof COLUMNS)[number]['key'];
@@ -319,6 +321,26 @@ export default function WorkTracker() {
   }, [hidden]);
   const visible = useCallback((k: ColumnKey) => !hidden.has(k), [hidden]);
 
+  /**
+   * The three people columns are sized from the roster actually loaded, not a
+   * fixed guess: a 132px column fits "Snahanku" and cuts "Vedshri Kulkarni".
+   * 46px covers the avatar, its gap and the cell padding; the rest is the
+   * longest name at roughly 7.8px a character, clamped so one very long name
+   * cannot swallow the table.
+   */
+  const peopleWidth = useMemo(() => {
+    const longest = users.reduce((n, u) => Math.max(n, u.name.length), 0);
+    return Math.min(230, Math.max(120, 46 + Math.ceil(longest * 7.8)));
+  }, [users]);
+
+  const widthOf = useCallback(
+    (c: (typeof COLUMNS)[number]) =>
+      c.key === 'name' || c.key === 'reportTo' || c.key === 'approver'
+        ? peopleWidth
+        : c.width,
+    [peopleWidth],
+  );
+
   const [showColumns, setShowColumns] = useState(false);
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
@@ -479,35 +501,31 @@ export default function WorkTracker() {
           {/* One control, doing both jobs: it narrows the table to one person
               and names who new work is filed under. Left on Everyone the table
               shows the whole team, which is what it opens on. */}
-          <label className="flex items-center gap-1.5">
-            <span className="whitespace-nowrap text-xs text-slate-400">I am</span>
-            <span className="w-36">
-              <Select
-                value={user}
-                onChange={(e) => setUser(e.target.value)}
-                aria-label="Who is adding this work"
-                title="Picks whose work is shown, and who new tasks are filed under"
-                className="py-1.5 text-sm"
-              >
-                <option value="">Everyone</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
-            </span>
-          </label>
-          {/* On Everyone the selector no longer names you, so say it plainly
-              rather than leave approvals looking arbitrary. */}
-          {!user && actorName && (
-            <span
-              className="whitespace-nowrap text-xs text-slate-400"
-              title="New work and approvals are filed under this name"
+          {/* No label. The two bits of chrome that used to explain this — an
+              "I am" prefix and an "acting as …" hint — read as clutter next to
+              a dropdown that plainly holds names. What they conveyed now lives
+              where it is actually needed: the hover title here, and the Approve
+              item's tooltip, which names who you are when it refuses. */}
+          <div className="w-40">
+            <Select
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+              aria-label="Who is adding this work"
+              title={
+                actorName
+                  ? `Showing ${user ? actorName + "'s work" : 'everyone'}. New tasks and approvals are filed under ${actorName}.`
+                  : 'Pick a person to see their work and file new tasks under them'
+              }
+              className="py-1.5 text-sm"
             >
-              acting as {actorName}
-            </span>
-          )}
+              <option value="">Everyone</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </Select>
+          </div>
           <Button size="sm" onClick={() => setAdding(true)} disabled={users.length === 0}>
             <Plus className="h-4 w-4" /> New task
           </Button>
@@ -577,11 +595,16 @@ export default function WorkTracker() {
                     {COLUMNS.filter((c) => visible(c.key)).map((c) => (
                       <th
                         key={c.key}
-                        style={{
-                          width: c.width,
-                          minWidth: c.width,
-                          left: c.sticky ? 0 : undefined,
-                        }}
+                        style={
+                          c.flex
+                            ? { minWidth: c.width }
+                            : {
+                                width: widthOf(c),
+                                minWidth: widthOf(c),
+                                maxWidth: widthOf(c),
+                                left: c.sticky ? 0 : undefined,
+                              }
+                        }
                         className={cn('whitespace-nowrap', c.sticky && 'sticky z-30')}
                       >
                         {c.key === 'status' ? (
@@ -635,6 +658,7 @@ export default function WorkTracker() {
                       task={t}
                       users={users}
                       actor={actor}
+                      actorName={actorName}
                       visible={visible}
                       savingCells={savingCells}
                       cellErrors={cellErrors}
@@ -672,6 +696,7 @@ function TaskRow({
   task,
   users,
   actor,
+  actorName,
   visible,
   savingCells,
   cellErrors,
@@ -683,6 +708,7 @@ function TaskRow({
   task: Task;
   users: User[];
   actor?: string;
+  actorName?: string;
   visible: (k: ColumnKey) => boolean;
   savingCells: Record<string, boolean>;
   cellErrors: Record<string, string>;
@@ -702,13 +728,14 @@ function TaskRow({
   // Approval is enabled only on completed work, and only for its own approver.
   const isApprover = Boolean(actor && task.approverId && actor === task.approverId);
   const canApprove = isApprover && task.status === 'completed' && !task.approvedAt;
+  // Names both sides when it refuses, so a disabled item is never a mystery.
   const approveReason = task.approvedAt
     ? 'Already approved'
     : task.status !== 'completed'
       ? 'Only completed work can be approved'
       : !task.approverId
         ? 'No approver set for this task'
-        : `Only ${task.approverName} can approve this`;
+        : `Only ${task.approverName} can approve this${actorName ? `, and you are ${actorName}` : ''}`;
 
   return (
     <tr className="group" style={{ background: 'var(--n0)' }}>
@@ -913,6 +940,8 @@ function NewTaskRow({
     status: TaskStatus;
     dueDate?: string | null;
     deadlineDate?: string | null;
+    reportTo?: string | null;
+    approverId?: string | null;
   }) => Promise<void>;
 }) {
   const [userId, setUserId] = useState(defaultUser ?? users[0]?.id ?? '');
@@ -921,6 +950,8 @@ function NewTaskRow({
   const [statusValue, setStatusValue] = useState<TaskStatus>('upcoming');
   const [dueDate, setDueDate] = useState('');
   const [deadlineDate, setDeadlineDate] = useState('');
+  const [reportTo, setReportTo] = useState('');
+  const [approverId, setApproverId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const firstRef = useRef<HTMLInputElement>(null);
 
@@ -943,6 +974,8 @@ function NewTaskRow({
       status: statusValue,
       dueDate: dueDate || null,
       deadlineDate: deadlineDate || null,
+      reportTo: reportTo || null,
+      approverId: approverId || null,
     });
   };
 
@@ -1033,8 +1066,30 @@ function NewTaskRow({
             />
           </td>
         )}
-        {visible('reportTo') && <td className="px-2 text-xs text-slate-400">From the roster</td>}
-        {visible('approver') && <td className="px-2 text-xs text-slate-400">—</td>}
+        {visible('reportTo') && (
+          <td>
+            <Select value={reportTo} onChange={(e) => setReportTo(e.target.value)} aria-label="Reports to">
+              <option value="">Nobody</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </Select>
+          </td>
+        )}
+        {visible('approver') && (
+          <td>
+            <Select value={approverId} onChange={(e) => setApproverId(e.target.value)} aria-label="Approver">
+              <option value="">Nobody</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </Select>
+          </td>
+        )}
         <td className="text-right">
           <div className="flex items-center gap-1">
             <Button size="sm" onClick={() => void commit()} disabled={pending} aria-label="Add task">

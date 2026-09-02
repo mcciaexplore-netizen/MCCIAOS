@@ -258,6 +258,7 @@ export function EditableText({
         value={draft}
         disabled={disabled}
         placeholder={placeholder}
+        title={draft || undefined}
         data-cell
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -464,6 +465,7 @@ export function UserCell({
             <>
               <Avatar name={current.name} size={24} />
               <span
+                title={current.name}
                 style={{ color: 'var(--n800)' }}
                 className="min-w-0 flex-1 truncate text-sm"
               >

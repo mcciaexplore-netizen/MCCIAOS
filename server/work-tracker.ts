@@ -421,14 +421,10 @@ export async function createTask(
   await requireUser(input.userId, 'assignee');
   const db = requireSql();
 
-  // report_to defaults to whoever the assignee reports to, but the caller can
-  // override it: task-level reporting is set per task.
-  let reportTo = input.reportTo ?? null;
-  if (reportTo === null) {
-    const owner = await getUser(input.userId);
-    reportTo = owner?.reportsTo ?? null;
-  }
-
+  // Reports to and Approver are left blank unless the caller sets them. They
+  // used to be pre-filled from the assignee's line manager, but people choose
+  // both per task, and a guessed value that nobody picked is worse than an
+  // empty cell — it looks decided.
   const rows = (await db.query(
     `insert into tasks
        (user_id, title, priority, status, allocation_date, due_date,
@@ -445,7 +441,7 @@ export async function createTask(
       input.allocationDate ?? null,
       input.dueDate ?? null,
       input.deadlineDate ?? null,
-      reportTo,
+      input.reportTo ?? null,
       input.approverId ?? null,
     ],
   )) as { id: string }[];

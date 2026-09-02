@@ -194,7 +194,10 @@ export interface User {
   role: 'ADMIN' | 'MEMBER';
   designation: string | null;
   department: string | null;
-  /** Line manager. A default suggestion for a task's reportTo, not a rule. */
+  /**
+   * Line manager, for reference on the Settings roster. It is never copied onto
+   * a task: people pick a task's Reports to and Approver themselves.
+   */
   reportsTo: string | null;
   reportsToName: string | null;
   avatarUrl: string | null;

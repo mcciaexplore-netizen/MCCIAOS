@@ -128,9 +128,9 @@ Computed per query, never stored, so they cannot go stale.
 One compact row above the table, nothing else between the title and the work:
 
 - **Tabs** — All work, Assigned to me, Overdue, each with a count badge.
-- **I am** — one selector on the right, beside New task. It narrows the table
-  to one person and names who new work is filed under. The table opens on
-  **Everyone**, showing the whole team.
+- **The person selector** — one dropdown on the right, beside New task. It
+  narrows the table to one person and names who new work is filed under. The
+  table opens on **Everyone**, showing the whole team.
 - **At risk** — an amber chip when anything has a deadline inside three days.
 - **New task**, and the autosave state.
 
@@ -144,6 +144,13 @@ Name, Title, Priority, Status, Allocation, Due, Deadline, Reports to, Approver,
 and the row menu. **Name is sticky**; the rest scroll. Column visibility is
 per-user in `localStorage`.
 
+Widths come from the content, not from round numbers: the three people columns
+are measured against the longest name in the roster on every render, so adding
+somebody called "Vedshri Kulkarni" widens them rather than cutting the name off.
+Title takes whatever space is left and holds a floor so it stays readable when
+the window is narrow. Long titles and names carry a hover tooltip, because an
+editable cell can always be given more text than fits.
+
 ### Identity
 
 There is no login. The **I am** selector is treated as the current user and is
@@ -151,9 +158,12 @@ passed to the API as `?actor=`. **This is a label, not authentication** — a
 caller can name anyone. Real enforcement needs the auth described above.
 
 Switching back to Everyone widens the table but **keeps you as the last person
-picked**, shown as "acting as …" beside the selector. Approval is done on
-somebody else's work, so an approver has to be able to see the whole team
-without ceasing to be themselves.
+picked**. Approval is done on somebody else's work, so an approver has to be
+able to see the whole team without ceasing to be themselves.
+
+The selector carries no label. Who you are shows in its hover title, and in the
+Approve item's tooltip when it refuses — which names both the task's approver
+and you, so a disabled item is never a mystery.
 
 ### Team and reporting lines
 
@@ -165,9 +175,10 @@ email, designation, department, reports to, role and an active flag.
   appear on. Deactivated people vanish from the pickers; their work stays.
 - **Reporting loops are blocked.** A recursive walk up the proposed manager's
   chain rejects the change and names who already reports up to whom.
-- `reports_to` is a **default suggestion**: a new task pre-fills its `report_to`
-  from the assignee's manager, and the task keeps whatever it is set to
-  afterwards. Changing somebody's manager never rewrites existing tasks.
+- A task's **Reports to and Approver are never guessed**. Both are left blank
+  until somebody picks them, on the row or in the new-task row. `users.reports_to`
+  records the line manager for reference only; it is not copied onto tasks,
+  because a value nobody chose still looks decided.
 - Email is **required by the form** from now on, though the column stays
   nullable — the rows that predate this have none, and inventing addresses for
   real people would be fabricating data.
