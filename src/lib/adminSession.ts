@@ -19,6 +19,12 @@ export interface AdminSession {
   /** False when the server has no password set — a different problem entirely. */
   configured: boolean;
   /**
+   * A complaint about the configured password — never the password itself.
+   * Shown on the sign-in screen because a warning that only reaches the server
+   * log is one nobody reads.
+   */
+  warning?: { level: 'severe' | 'weak'; message: string };
+  /**
    * Whether the server has answered yet. Before it has, `authenticated: false`
    * means "not known", not "signed out" — and rendering a denial on that would
    * flash one at the very person entitled to be there.
@@ -59,6 +65,7 @@ export async function refreshSession(): Promise<AdminSession> {
       expiresAt: body.expiresAt ?? null,
       reason: body.reason,
       configured: body.configured !== false,
+      warning: body.warning,
       resolved: true,
     };
   } catch {

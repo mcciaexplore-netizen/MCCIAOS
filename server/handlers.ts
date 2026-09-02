@@ -50,6 +50,7 @@ import {
   isAdmin,
   issueSession,
   passwordMatches,
+  passwordWarning,
   readSession,
   sessionCookie,
 } from './admin-session.js';
@@ -374,9 +375,12 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   if (pathname === '/api/admin/session') {
     if (method !== 'GET') return json(405, { error: 'Method not allowed' });
     const state = readSession(req.headers['cookie']);
+    const warning = passwordWarning();
     return json(200, {
       authenticated: state.valid,
       expiresAt: state.valid ? state.expiresAt : null,
+      // The complaint, never the password it is about.
+      warning: warning ?? undefined,
       // Lets the page say "your session expired" rather than a blank prompt.
       reason: state.valid ? undefined : state.reason,
       configured: adminPassword() !== null,

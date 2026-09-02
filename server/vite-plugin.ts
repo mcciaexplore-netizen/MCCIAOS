@@ -3,6 +3,7 @@
 
 import type { Plugin, ViteDevServer } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { passwordWarning } from './admin-session.js';
 
 function readBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve) => {
@@ -23,10 +24,23 @@ function readBody(req: IncomingMessage): Promise<unknown> {
 /** Methods whose requests may carry a body. Must match the Vercel adapter. */
 const METHODS_WITH_BODY = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+/**
+ * Said once when the server starts. An advisory buried in a response body is
+ * one nobody reads; this is the moment somebody is actually looking.
+ */
+function announcePasswordWarning() {
+  const w = passwordWarning();
+  if (!w) return;
+  const label = w.level === 'severe' ? 'SECURITY' : 'Note';
+  // eslint-disable-next-line no-console
+  console.warn(`\n  [${label}] ${w.message}\n`);
+}
+
 export function apiMiddleware(): Plugin {
   return {
     name: 'mccia-api-middleware',
     configureServer(server: ViteDevServer) {
+      announcePasswordWarning();
       server.middlewares.use(async (req, res, next) => {
         const url = req.url ?? '';
         if (!url.startsWith('/api/')) return next();

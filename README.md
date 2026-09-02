@@ -451,10 +451,19 @@ account:
    Without this every call returns 403, and the error says so by name.
 4. Put the four variables in Vercel's project settings.
 
-The schedule is in `vercel.json` as `30 12 * * *` — 12:30 UTC is 18:00 IST.
-Vercel Cron runs in UTC and has no timezone setting, so the offset is baked into
-the expression; if India ever changed its offset this line would need changing
-with it. On Vercel's Hobby plan crons fire approximately, not to the minute.
+**There is no schedule.** The export runs when somebody presses **Run now** in
+Settings, or when `POST /api/export/daily` is called with `CRON_SECRET`. The
+Vercel cron entry was removed deliberately — deployment and scheduling are done
+by hand here.
+
+To put a schedule back, add to `vercel.json`:
+
+```json
+"crons": [{ "path": "/api/export/daily", "schedule": "30 12 * * *" }]
+```
+
+12:30 UTC is 18:00 IST. Vercel Cron runs in UTC with no timezone setting, so the
+offset is baked into the expression.
 
 The client is `server/google-sheets.ts` — a signed JWT and three REST calls
 rather than the `googleapis` package, which is tens of megabytes for the same
