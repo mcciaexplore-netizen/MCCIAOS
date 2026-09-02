@@ -2,7 +2,7 @@
 // Error handling is deliberately identical to ./api and ./eventsApi.
 
 import type {
-  SharedTask,
+  AtRiskTask,
   Task,
   TaskActivity,
   TaskTabCounts,
@@ -10,8 +10,6 @@ import type {
   User,
 } from '@/types';
 import type {
-  CollaboratorInput,
-  CollaboratorUpdateInput,
   TaskInput,
   TaskUpdateInput,
   UserInput,
@@ -40,14 +38,15 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (body ?? {}) as T;
 }
 
-export type TabKey = 'all' | 'assigned_to_me' | 'due_soon' | 'overdue' | 'completed';
+export type TabKey = 'all' | 'assigned_to_me' | 'overdue';
 
 export interface TaskQuery {
-  assignee?: string;
+  user?: string;
   status?: string;
   priority?: string;
   tab?: TabKey;
-  overdue?: string;
+  sort?: string;
+  dir?: string;
 }
 
 function qs(params: object): string {
@@ -59,9 +58,10 @@ function qs(params: object): string {
 }
 
 export const trackerApi = {
-  users(includeInactive = false) {
+  /** Active people only by default; the dropdowns must not offer leavers. */
+  users(activeOnly = true) {
     return request<{ users: User[] }>(
-      `/api/users${includeInactive ? '?includeInactive=true' : ''}`,
+      `/api/users${activeOnly ? '' : '?active=false'}`,
     );
   },
 
@@ -79,8 +79,11 @@ export const trackerApi = {
     });
   },
 
-  removeUser(id: string) {
-    return request<{ success: boolean }>(`/api/users/${id}`, { method: 'DELETE' });
+  /** Deactivate, never delete: removing somebody orphans all their work. */
+  deactivateUser(id: string) {
+    return request<{ user: User }>(`/api/users/${id}/deactivate`, {
+      method: 'PATCH',
+    });
   },
 
   /**
@@ -103,16 +106,16 @@ export const trackerApi = {
   },
 
   /** Counts for all five tab badges in one request. */
-  summary(assignee?: string) {
-    return request<TaskTabCounts>(`/api/summary?${qs({ assignee })}`);
+  summary(user?: string) {
+    return request<TaskTabCounts>(`/api/summary?${qs({ user })}`);
   },
 
-  today(assignee?: string) {
-    return request<TodayCounts>(`/api/today?${qs({ assignee })}`);
+  today(user?: string) {
+    return request<TodayCounts>(`/api/today?${qs({ user })}`);
   },
 
-  shared(assignee?: string) {
-    return request<{ tasks: SharedTask[] }>(`/api/shared?${qs({ assignee })}`);
+  atRisk(user?: string) {
+    return request<{ tasks: AtRiskTask[] }>(`/api/at-risk?${qs({ user })}`);
   },
 
   create(input: TaskInput, actor?: string) {
@@ -137,29 +140,10 @@ export const trackerApi = {
     return request<{ success: boolean }>(`/api/tasks/${id}`, { method: 'DELETE' });
   },
 
-  addCollaborator(taskId: string, input: CollaboratorInput, actor?: string) {
-    return request<{ task: Task }>(
-      `/api/tasks/${taskId}/collaborators?${qs({ actor })}`,
-      { method: 'POST', body: JSON.stringify(input) },
-    );
-  },
-
-  updateCollaborator(
-    taskId: string,
-    userId: string,
-    patch: CollaboratorUpdateInput,
-    actor?: string,
-  ) {
-    return request<{ task: Task }>(
-      `/api/tasks/${taskId}/collaborators/${userId}?${qs({ actor })}`,
-      { method: 'PATCH', body: JSON.stringify(patch) },
-    );
-  },
-
-  removeCollaborator(taskId: string, userId: string, actor?: string) {
-    return request<{ task: Task }>(
-      `/api/tasks/${taskId}/collaborators/${userId}?${qs({ actor })}`,
-      { method: 'DELETE' },
-    );
+  /** Approval is an action, not a status. Approver-only, completed work only. */
+  approve(id: string, actor?: string) {
+    return request<{ task: Task }>(`/api/tasks/${id}/approve?${qs({ actor })}`, {
+      method: 'POST',
+    });
   },
 };

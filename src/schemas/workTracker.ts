@@ -6,58 +6,47 @@
 import { z } from 'zod';
 
 export const TASK_STATUSES = [
-  'not_started',
-  'in_progress',
-  'blocked',
-  'submitted',
-  'approved',
+  'upcoming',
+  'ongoing',
+  'hold',
+  'stopped',
   'completed',
 ] as const;
 
-export const TASK_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
-export const TASK_TYPES = ['task', 'bug', 'story', 'admin'] as const;
-export const COLLABORATOR_ROLES = ['contributor', 'reviewer'] as const;
+export const TASK_PRIORITIES = ['high', 'medium', 'low'] as const;
 
-/** Statuses that count as finished, for the Completed tab and overdue logic. */
-export const CLOSED_STATUSES = ['approved', 'completed'] as const;
+/** Work that is still live, so still capable of being late. */
+export const OPEN_STATUSES = ['upcoming', 'ongoing', 'hold'] as const;
 
-const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a YYYY-MM-DD date');
-
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a YYYY-MM-DD date');
 const uuid = z.string().uuid('Not a valid id');
-
-/** A date field that can be cleared: a date string, or null. */
 const nullableDate = isoDate.nullable().optional();
 
 const taskFields = z.object({
-  title: z.string().trim().min(1, 'Give the task a title'),
-  description: z.string().nullable().optional(),
-  type: z.enum(TASK_TYPES).default('task'),
-  status: z.enum(TASK_STATUSES).default('not_started'),
+  userId: uuid,
+  title: z.string().trim().min(1, 'Give the work a title'),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
-  assigneeId: uuid,
-  allocatedBy: uuid.nullable().optional(),
+  status: z.enum(TASK_STATUSES).default('upcoming'),
+  allocationDate: nullableDate,
+  dueDate: nullableDate,
+  deadlineDate: nullableDate,
   reportTo: uuid.nullable().optional(),
   approverId: uuid.nullable().optional(),
-  allocatedAt: z.string().nullable().optional(),
-  dueDate: nullableDate,
-  deadline: nullableDate,
 });
 
 type TaskFields = Partial<z.infer<typeof taskFields>>;
 
 /**
- * "deadline cannot be earlier than due_date". Only judgeable when both are
+ * "deadline_date cannot be earlier than due_date". Only judgeable when both are
  * present in the same payload; a partial PATCH is re-checked server-side
  * against the merged row, and Postgres enforces it as a CHECK regardless.
  */
 function checkDates(v: TaskFields, ctx: z.RefinementCtx) {
-  if (v.dueDate && v.deadline && v.deadline < v.dueDate) {
+  if (v.dueDate && v.deadlineDate && v.deadlineDate < v.dueDate) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ['deadline'],
-      message: 'Deadline cannot be earlier than the due date',
+      path: ['deadlineDate'],
+      message: 'The deadline cannot be earlier than the due date',
     });
   }
 }
@@ -66,47 +55,21 @@ export const taskSchema = taskFields.superRefine(checkDates);
 
 /**
  * PATCH body. Every field optional — inline editing sends one cell at a time,
- * often a single key like `{ "status": "in_progress" }`.
+ * often a single key like `{ "status": "ongoing" }`.
  */
 export const taskUpdateSchema = taskFields.partial().superRefine(checkDates);
 
-export const collaboratorSchema = z.object({
-  userId: uuid,
-  role: z.enum(COLLABORATOR_ROLES).default('contributor'),
-  memberDueDate: nullableDate,
-});
-
-export const collaboratorUpdateSchema = z
-  .object({
-    role: z.enum(COLLABORATOR_ROLES).optional(),
-    memberDueDate: nullableDate,
-  })
-  .refine((v) => v.role !== undefined || v.memberDueDate !== undefined, {
-    message: 'Nothing to update',
-  });
-
-export type TaskInput = z.infer<typeof taskSchema>;
-export type TaskUpdateInput = z.infer<typeof taskUpdateSchema>;
-export type CollaboratorInput = z.infer<typeof collaboratorSchema>;
-export type CollaboratorUpdateInput = z.infer<typeof collaboratorUpdateSchema>;
-
 // ---- Team members ---------------------------------------------------------
-// The roster moved out of the Settings record and into the `users` table, so
-// these guard the Settings team editor as well as the API.
 
 const userFields = z.object({
   name: z.string().trim().min(1, 'A name is required'),
+  // Required by the form for anyone added or edited from now on, but the column
+  // stays nullable: the rows that already existed have no address and
+  // inventing one for a real person would be fabricating data.
+  email: z.string().trim().email('Enter a valid email').nullable().optional(),
   designation: z.string().nullable().optional(),
   department: z.string().nullable().optional(),
-  // Optional and nullable: existing rows have no email, and inventing one to
-  // satisfy a required field would be fabricating data about a real person.
-  email: z
-    .string()
-    .trim()
-    .email('Enter a valid email')
-    .nullable()
-    .optional()
-    .or(z.literal('')),
+  reportsTo: uuid.nullable().optional(),
   role: z.enum(['ADMIN', 'MEMBER']).default('MEMBER'),
   isActive: z.boolean().default(true),
 });
@@ -114,5 +77,7 @@ const userFields = z.object({
 export const userSchema = userFields;
 export const userUpdateSchema = userFields.partial();
 
+export type TaskInput = z.infer<typeof taskSchema>;
+export type TaskUpdateInput = z.infer<typeof taskUpdateSchema>;
 export type UserInput = z.infer<typeof userSchema>;
 export type UserUpdateInput = z.infer<typeof userUpdateSchema>;

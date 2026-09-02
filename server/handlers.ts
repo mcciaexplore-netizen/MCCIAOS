@@ -14,9 +14,6 @@ import {
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
-  TASK_TYPES,
-  collaboratorSchema,
-  collaboratorUpdateSchema,
   taskSchema,
   taskUpdateSchema,
   userSchema,
@@ -26,22 +23,20 @@ import { parseCsv, toCsv } from '../src/lib/csv.js';
 import { isIsoDate } from '../src/lib/ist.js';
 import {
   TrackerError,
-  addCollaborator,
+  approveTask,
   createTask,
   createUser,
-  deleteUser,
-  updateUser,
+  deactivateUser,
   deleteTask,
   getActivity,
-  getShared,
+  getAtRisk,
   getTabCounts,
   getTask,
   getToday,
   listTasks,
   listUsers,
-  removeCollaborator,
-  updateCollaborator,
   updateTask,
+  updateUser,
 } from './work-tracker.js';
 import {
   EventError,
@@ -306,7 +301,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     pathname.startsWith('/api/users') ||
     pathname === '/api/summary' ||
     pathname === '/api/today' ||
-    pathname === '/api/shared'
+    pathname === '/api/at-risk'
   ) {
     return handleWorkTracker(req);
   }
@@ -637,9 +632,9 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     // ---- /api/users --------------------------------------------------------
     if (pathname === '/api/users') {
       if (method === 'GET') {
-        return json(200, {
-          users: await listUsers(query.get('includeInactive') === 'true'),
-        });
+        // Defaults to active only: these feed the dropdowns, and offering
+        // somebody who has left is how stale assignments happen.
+        return json(200, { users: await listUsers(query.get('active') !== 'false') });
       }
       if (method === 'POST') {
         const parsed = userSchema.safeParse(camelBody(req.body));
@@ -650,9 +645,16 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
       return json(405, { error: 'Method not allowed' });
     }
 
-    const userMatch = pathname.match(/^\/api\/users\/([^/]+)$/);
-    if (userMatch && userMatch[1] !== 'sync') {
-      const id = userMatch[1];
+    const userMatch = pathname.match(/^\/api\/users\/([^/]+)(?:\/(deactivate))?$/);
+    if (userMatch) {
+      const [, id, sub] = userMatch;
+
+      if (sub === 'deactivate') {
+        if (method !== 'PATCH') return json(405, { error: 'Method not allowed' });
+        const user = await deactivateUser(id);
+        if (!user) return json(404, { error: 'Not found' });
+        return json(200, { user });
+      }
       if (method === 'PATCH') {
         const parsed = userUpdateSchema.safeParse(camelBody(req.body));
         if (!parsed.success)
@@ -661,30 +663,27 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
         if (!user) return json(404, { error: 'Not found' });
         return json(200, { user });
       }
-      if (method === 'DELETE') {
-        const ok = await deleteUser(id);
-        if (!ok) return json(404, { error: 'Not found' });
-        return json(200, { success: true });
-      }
-      return json(405, { error: 'Method not allowed' });
+      // Deliberately no DELETE: removing somebody orphans every task,
+      // reports_to link and approver reference they appear on.
+      return json(405, {
+        error: 'People are deactivated, not deleted, so their work survives.',
+      });
     }
 
-    // ---- /api/summary — one call, every tab badge --------------------------
+    // ---- /api/summary — every tab badge in one call ------------------------
     if (pathname === '/api/summary') {
       if (method !== 'GET') return json(405, { error: 'Method not allowed' });
-      return json(200, await getTabCounts(query.get('assignee')));
+      return json(200, await getTabCounts(query.get('user')));
     }
 
-    // ---- /api/today --------------------------------------------------------
     if (pathname === '/api/today') {
       if (method !== 'GET') return json(405, { error: 'Method not allowed' });
-      return json(200, await getToday(query.get('assignee')));
+      return json(200, await getToday(query.get('user')));
     }
 
-    // ---- /api/shared -------------------------------------------------------
-    if (pathname === '/api/shared') {
+    if (pathname === '/api/at-risk') {
       if (method !== 'GET') return json(405, { error: 'Method not allowed' });
-      return json(200, { tasks: await getShared(query.get('assignee')) });
+      return json(200, { tasks: await getAtRisk(query.get('user')) });
     }
 
     // ---- /api/tasks --------------------------------------------------------
@@ -698,22 +697,19 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
           return json(400, {
             error: `priority must be one of ${TASK_PRIORITIES.join(', ')}`,
           });
-        const type = query.get('type');
-        if (type && !(TASK_TYPES as readonly string[]).includes(type))
-          return json(400, { error: `type must be one of ${TASK_TYPES.join(', ')}` });
         const tab = query.get('tab');
-        const TABS = ['all', 'assigned_to_me', 'due_soon', 'overdue', 'completed'];
+        const TABS = ['all', 'assigned_to_me', 'overdue'];
         if (tab && !TABS.includes(tab))
           return json(400, { error: `tab must be one of ${TABS.join(', ')}` });
 
-        // No assignee means the whole team, which is what the All work tab shows.
         return json(200, {
           tasks: await listTasks({
-            assignee: query.get('assignee'),
+            user: query.get('user'),
             status,
             priority,
-            overdue: query.get('overdue') === 'true',
             tab,
+            sort: query.get('sort'),
+            dir: query.get('dir'),
           }),
         });
       }
@@ -727,43 +723,17 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
       return json(405, { error: 'Method not allowed' });
     }
 
-    // ---- /api/tasks/:id/collaborators[/:userId] ----------------------------
-    const collabMatch = pathname.match(
-      /^\/api\/tasks\/([^/]+)\/collaborators(?:\/([^/]+))?$/,
-    );
-    if (collabMatch) {
-      const [, taskId, userId] = collabMatch;
-
-      if (!userId) {
-        if (method !== 'POST') return json(405, { error: 'Method not allowed' });
-        const parsed = collaboratorSchema.safeParse(camelBody(req.body));
-        if (!parsed.success)
-          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
-        const task = await addCollaborator(taskId, parsed.data, actor);
-        if (!task) return json(404, { error: 'Not found' });
-        return json(201, { task });
-      }
-
-      if (method === 'PATCH') {
-        const parsed = collaboratorUpdateSchema.safeParse(camelBody(req.body));
-        if (!parsed.success)
-          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
-        const task = await updateCollaborator(taskId, userId, parsed.data, actor);
-        if (!task) return json(404, { error: 'Not found' });
-        return json(200, { task });
-      }
-      if (method === 'DELETE') {
-        const task = await removeCollaborator(taskId, userId, actor);
-        if (!task) return json(404, { error: 'Not found' });
-        return json(200, { task });
-      }
-      return json(405, { error: 'Method not allowed' });
-    }
-
-    // ---- /api/tasks/:id ----------------------------------------------------
-    const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/);
+    // ---- /api/tasks/:id[/approve] ------------------------------------------
+    const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(approve))?$/);
     if (taskMatch) {
-      const id = taskMatch[1];
+      const [, id, sub] = taskMatch;
+
+      if (sub === 'approve') {
+        if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+        const task = await approveTask(id, actor);
+        if (!task) return json(404, { error: 'Not found' });
+        return json(200, { task });
+      }
 
       if (method === 'GET') {
         const task = await getTask(id);
@@ -778,8 +748,8 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
           return json(422, { error: 'Validation failed', issues: parsed.error.issues });
         const task = await updateTask(id, parsed.data, actor);
         if (!task) return json(404, { error: 'Not found' });
-        // The full row goes back so the client can reconcile server-set
-        // fields like completed_at, approved_at and updated_at.
+        // The full row goes back so the client can reconcile server-set fields
+        // like completed_at and updated_at.
         return json(200, { task });
       }
       if (method === 'DELETE') {

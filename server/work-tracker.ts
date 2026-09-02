@@ -4,24 +4,22 @@
 // generic `records` store, and therefore requires the Postgres backend — it
 // reports NO_SQL_MESSAGE when DATABASE_URL is unset.
 //
-// ONE TABLE FOR THE WHOLE TEAM. `tasks` is filtered by assignee_id; there is no
-// table, schema or database per user. The user dropdown is a filter. Splitting
-// per user would make the team view, the overdue report and the workload
-// summary impossible to build.
+// ONE TABLE FOR THE WHOLE TEAM. `tasks` is filtered by user_id; there is no
+// table, schema or database per person. The person filter is a WHERE clause.
+// Splitting per user would make the team view, the overdue report and the
+// workload summary impossible to build.
 //
-// TIMEZONE. Dates are Asia/Kolkata calendar days, matching the rest of the app:
-// `(now() at time zone 'Asia/Kolkata')::date` in SQL, src/lib/ist.ts in TS.
+// ONE PERSON PER TASK. There is no collaborators table.
+//
+// TIMEZONE. Dates are Asia/Kolkata calendar days, matching the rest of the app.
 
 import { requireSql } from './sql.js';
 import type {
-  CollaboratorRole,
-  SharedTask,
+  AtRiskTask,
   Task,
   TaskActivity,
-  TaskCollaborator,
   TaskPriority,
   TaskStatus,
-  TaskType,
   TaskTabCounts,
   TodayCounts,
   User,
@@ -51,151 +49,115 @@ const blank = (v: unknown): string | null => {
   return t === '' ? null : t;
 };
 
-/** The IST calendar day, as SQL. Used for every "today" comparison. */
+/** The IST calendar day, as SQL. Every "today" comparison goes through this. */
 const TODAY = `(now() at time zone 'Asia/Kolkata')::date`;
+
+/**
+ * Work that is still live. Stopped work was dropped on purpose and completed
+ * work is finished, so neither can be late.
+ */
+const OPEN = `('upcoming','ongoing','hold')`;
 
 /**
  * The date that decides whether work is late.
  *
- * `due_date` is the working target and `deadline` is the hard limit, so missing
- * the target is not yet a failure — only blowing the deadline is. A row with no
- * deadline falls back to its due date, otherwise it could never be late at all.
- *
- * The CHECK constraint keeps deadline >= due_date, so this is also exactly the
- * point at which *both* dates have passed.
+ * `due_date` is the working target and `deadline_date` is the hard limit, so
+ * missing the target is not yet a failure — only blowing the deadline is. A row
+ * with no deadline falls back to its due date, otherwise it could never be late.
  */
-const LATE_DATE = `coalesce(t.deadline, t.due_date)`;
+const LATE_DATE = `coalesce(t.deadline_date, t.due_date)`;
 
 // ---- Row shapes ------------------------------------------------------------
 
 interface TaskRow {
   id: string;
-  ref: string;
+  user_id: string;
+  user_name: string;
   title: string;
-  description: string | null;
-  type: string;
-  status: string;
   priority: string;
-  assignee_id: string;
-  assignee_name: string;
-  allocated_by: string | null;
-  allocated_by_name: string | null;
+  status: string;
+  allocation_date: string | null;
+  due_date: string | null;
+  deadline_date: string | null;
   report_to: string | null;
   report_to_name: string | null;
   approver_id: string | null;
   approver_name: string | null;
-  allocated_at: string | Date;
-  due_date: string | null;
-  deadline: string | null;
   completed_at: string | Date | null;
   approved_at: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
   is_overdue: boolean;
   has_slipped: boolean;
+  past_deadline: boolean;
   days_left: number | null;
-  at_risk: boolean;
-  collaborators: TaskCollaborator[] | null;
 }
 
 // Dates are rendered to text in Postgres rather than left to the driver's type
 // parser: a `date` parsed into a JS Date materialises at the server's own
 // midnight and shifts the calendar day either side of UTC.
-//
-// is_overdue / days_left / at_risk are computed here, never stored, so they
-// cannot go stale between the write and the read.
 const TASK_COLUMNS = `
-  t.id, t.ref, t.title, t.description, t.type, t.status, t.priority,
-  t.assignee_id, ua.name as assignee_name,
-  t.allocated_by, ub.name as allocated_by_name,
+  t.id, t.user_id, uo.name as user_name, t.title, t.priority, t.status,
+  to_char(t.allocation_date, 'YYYY-MM-DD') as allocation_date,
+  to_char(t.due_date,        'YYYY-MM-DD') as due_date,
+  to_char(t.deadline_date,   'YYYY-MM-DD') as deadline_date,
   t.report_to,   ur.name as report_to_name,
-  t.approver_id, uv.name as approver_name,
-  t.allocated_at,
-  to_char(t.due_date, 'YYYY-MM-DD') as due_date,
-  to_char(t.deadline, 'YYYY-MM-DD') as deadline,
+  t.approver_id, ua.name as approver_name,
   t.completed_at, t.approved_at, t.created_at, t.updated_at,
-  (${LATE_DATE} is not null
-    and ${LATE_DATE} < ${TODAY}
-    and t.status not in ('approved','completed'))            as is_overdue,
+  (${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
+    and t.status in ${OPEN})                                  as is_overdue,
   -- Past the working target but still inside the deadline. Without this the
-  -- stricter overdue rule would leave a slipped target with no signal at all.
-  (t.due_date is not null
-    and t.due_date < ${TODAY}
+  -- deadline-based overdue rule would leave a slipped target with no signal.
+  (t.due_date is not null and t.due_date < ${TODAY}
     and (${LATE_DATE} is null or ${LATE_DATE} >= ${TODAY})
-    and t.status not in ('approved','completed'))            as has_slipped,
-  (t.due_date - ${TODAY})                                     as days_left,
-  (t.due_date is not null
-    and (t.due_date - ${TODAY}) between 0 and 2
-    and t.status in ('not_started','blocked'))                as at_risk,
-  coalesce((
-    select jsonb_agg(jsonb_build_object(
-      'taskId',        c.task_id,
-      'userId',        c.user_id,
-      'userName',      uc.name,
-      'role',          c.role,
-      'memberDueDate', to_char(c.member_due_date, 'YYYY-MM-DD'),
-      'allocatedAt',   c.allocated_at
-    ) order by uc.name)
-    from task_collaborators c
-    join users uc on uc.id = c.user_id
-    where c.task_id = t.id
-  ), '[]'::jsonb) as collaborators
+    and t.status in ${OPEN})                                  as has_slipped,
+  (t.deadline_date is not null and t.deadline_date < ${TODAY}
+    and t.status <> 'completed')                              as past_deadline,
+  (t.due_date - ${TODAY})                                     as days_left
 `;
 
 const TASK_JOINS = `
   from tasks t
-  join users ua on ua.id = t.assignee_id
-  left join users ub on ub.id = t.allocated_by
+  join users uo on uo.id = t.user_id
   left join users ur on ur.id = t.report_to
-  left join users uv on uv.id = t.approver_id
+  left join users ua on ua.id = t.approver_id
 `;
 
 function toTask(row: TaskRow): Task {
   return {
     id: row.id,
-    ref: row.ref,
+    userId: row.user_id,
+    userName: row.user_name,
     title: row.title,
-    description: row.description,
-    type: row.type as TaskType,
-    status: row.status as TaskStatus,
     priority: row.priority as TaskPriority,
-    assigneeId: row.assignee_id,
-    assigneeName: row.assignee_name,
-    allocatedBy: row.allocated_by,
-    allocatedByName: row.allocated_by_name,
+    status: row.status as TaskStatus,
+    allocationDate: row.allocation_date,
+    dueDate: row.due_date,
+    deadlineDate: row.deadline_date,
     reportTo: row.report_to,
     reportToName: row.report_to_name,
     approverId: row.approver_id,
     approverName: row.approver_name,
-    allocatedAt: iso(row.allocated_at) as string,
-    dueDate: row.due_date,
-    deadline: row.deadline,
     completedAt: iso(row.completed_at),
     approvedAt: iso(row.approved_at),
     createdAt: iso(row.created_at) as string,
     updatedAt: iso(row.updated_at) as string,
-    collaborators: (row.collaborators ?? []).map((c) => ({
-      ...c,
-      allocatedAt: iso(c.allocatedAt as unknown as string) as string,
-    })),
     isOverdue: Boolean(row.is_overdue),
     hasSlipped: Boolean(row.has_slipped),
+    pastDeadline: Boolean(row.past_deadline),
     daysLeft: row.days_left == null ? null : Number(row.days_left),
-    atRisk: Boolean(row.at_risk),
   };
 }
 
 // ---- Users -----------------------------------------------------------------
 
-export async function listUsers(includeInactive = false): Promise<User[]> {
-  const db = requireSql();
-  const rows = (await db.query(
-    `select id, name, email, role, designation, department, reports_to,
-            avatar_url, is_active
-     from users ${includeInactive ? '' : 'where is_active'}
-     order by name asc`,
-  )) as Record<string, unknown>[];
-  return rows.map((r) => ({
+const USER_COLUMNS = `
+  u.id, u.name, u.email, u.role, u.designation, u.department,
+  u.reports_to, m.name as reports_to_name, u.avatar_url, u.is_active
+`;
+
+function toUser(r: Record<string, unknown>): User {
+  return {
     id: String(r.id),
     name: String(r.name),
     email: (r.email as string | null) ?? null,
@@ -203,9 +165,32 @@ export async function listUsers(includeInactive = false): Promise<User[]> {
     designation: (r.designation as string | null) ?? null,
     department: (r.department as string | null) ?? null,
     reportsTo: (r.reports_to as string | null) ?? null,
+    reportsToName: (r.reports_to_name as string | null) ?? null,
     avatarUrl: (r.avatar_url as string | null) ?? null,
     isActive: Boolean(r.is_active),
-  }));
+  };
+}
+
+export async function listUsers(activeOnly = true): Promise<User[]> {
+  const db = requireSql();
+  const rows = (await db.query(
+    `select ${USER_COLUMNS}
+     from users u left join users m on m.id = u.reports_to
+     ${activeOnly ? 'where u.is_active' : ''}
+     order by u.name asc`,
+  )) as Record<string, unknown>[];
+  return rows.map(toUser);
+}
+
+async function getUser(id: string): Promise<User | null> {
+  if (!UUID_RE.test(id)) return null;
+  const db = requireSql();
+  const rows = (await db.query(
+    `select ${USER_COLUMNS} from users u
+     left join users m on m.id = u.reports_to where u.id = $1::uuid`,
+    [id],
+  )) as Record<string, unknown>[];
+  return rows[0] ? toUser(rows[0]) : null;
 }
 
 async function requireUser(id: string, label = 'user'): Promise<void> {
@@ -220,17 +205,28 @@ async function requireUser(id: string, label = 'user'): Promise<void> {
 // ---- Filtering -------------------------------------------------------------
 
 export interface TaskFilters {
-  assignee?: string | null;
+  user?: string | null;
   status?: string | null;
   priority?: string | null;
-  overdue?: boolean;
   tab?: string | null;
+  sort?: string | null;
+  dir?: string | null;
 }
 
 /**
- * Builds the WHERE clause. Every value is bound as a parameter — no caller
- * input is ever concatenated into the SQL text.
+ * Sortable columns, chosen from a fixed set — no caller input reaches the SQL.
+ *
+ * Text sorts are case-insensitive. The database's own collation puts "MSME"
+ * before "Mail", which is not the order a person reading the list expects.
  */
+const SORTABLE: Record<string, string> = {
+  name: 'lower(uo.name)',
+  title: 'lower(t.title)',
+  allocation: 't.allocation_date',
+  due: 't.due_date',
+  deadline: 't.deadline_date',
+};
+
 function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -239,50 +235,17 @@ function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
     return `$${params.length}`;
   };
 
-  // A person's list is everything they own OR collaborate on — except on the
-  // "Assigned to me" tab, which is deliberately ownership only.
-  if (f.assignee) {
-    const p = bind(f.assignee);
-    conditions.push(
-      f.tab === 'assigned_to_me'
-        ? `t.assignee_id = ${p}::uuid`
-        : `(t.assignee_id = ${p}::uuid
-            or exists (select 1 from task_collaborators c
-                        where c.task_id = t.id and c.user_id = ${p}::uuid))`,
-    );
-  }
+  if (f.user) conditions.push(`t.user_id = ${bind(f.user)}::uuid`);
   if (f.status) conditions.push(`t.status = ${bind(f.status)}`);
   if (f.priority) conditions.push(`t.priority = ${bind(f.priority)}`);
-  if (f.overdue) {
-    conditions.push(
-      `${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
-       and t.status not in ('approved','completed')`,
-    );
-  }
 
   switch (f.tab) {
-    case 'all':
-      conditions.push(`t.status <> 'completed'`);
-      break;
-    case 'assigned_to_me':
-      // The assignee filter above already narrowed to ownership.
-      conditions.push(`t.status <> 'completed'`);
-      break;
-    case 'due_soon':
-      conditions.push(
-        `t.due_date is not null and (t.due_date - ${TODAY}) between 0 and 3
-         and t.status not in ('approved','completed')`,
-      );
-      break;
     case 'overdue':
       conditions.push(
-        `${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
-         and t.status not in ('approved','completed')`,
+        `${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY} and t.status in ${OPEN}`,
       );
       break;
-    case 'completed':
-      conditions.push(`t.status in ('approved','completed')`);
-      break;
+    // "All work" is everything, and "Assigned to me" is the person filter above.
     default:
       break;
   }
@@ -296,14 +259,18 @@ function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
 export async function listTasks(filters: TaskFilters): Promise<Task[]> {
   const db = requireSql();
   const { clause, params } = buildWhere(filters);
+  const col = SORTABLE[filters.sort ?? ''];
+  const dir = filters.dir === 'desc' ? 'desc' : 'asc';
+  const order = col
+    ? `order by ${col} ${dir} nulls last, t.created_at desc`
+    : `order by
+         case when t.due_date is null then 1 else 0 end,
+         t.due_date asc,
+         case t.priority when 'high' then 0 when 'medium' then 1 else 2 end,
+         t.created_at desc`;
+
   const rows = (await db.query(
-    `select ${TASK_COLUMNS} ${TASK_JOINS} ${clause}
-     order by
-       case when t.due_date is null then 1 else 0 end,
-       t.due_date asc,
-       case t.priority when 'critical' then 0 when 'high' then 1
-                       when 'medium' then 2 else 3 end,
-       t.created_at desc`,
+    `select ${TASK_COLUMNS} ${TASK_JOINS} ${clause} ${order}`,
     params,
   )) as TaskRow[];
   return rows.map(toTask);
@@ -343,72 +310,39 @@ export async function getActivity(taskId: string): Promise<TaskActivity[]> {
   }));
 }
 
-// ---- Summary / today / shared ----------------------------------------------
+// ---- Summary / today / at risk ---------------------------------------------
 
-/**
- * Counts for every tab in one call, so five badges need one request.
- *
- * Scoped by the same person filter the table uses, otherwise a badge would
- * promise rows the filtered table does not show. `assigned_to_me` is ownership
- * only; every other count includes tasks the person collaborates on. With no
- * person selected ("All team") assigned_to_me is 0 and the UI hides that tab.
- */
-export async function getTabCounts(assignee?: string | null): Promise<TaskTabCounts> {
+/** Every tab badge in one call, scoped by the same person filter as the table. */
+export async function getTabCounts(user?: string | null): Promise<TaskTabCounts> {
   const db = requireSql();
-  const who = assignee && UUID_RE.test(assignee) ? assignee : null;
+  const who = user && UUID_RE.test(user) ? user : null;
   const rows = (await db.query(
-    `with scoped as (
-       select t.* from tasks t
-       where $1::uuid is null
-          or t.assignee_id = $1::uuid
-          or exists (select 1 from task_collaborators c
-                      where c.task_id = t.id and c.user_id = $1::uuid)
-     )
-     select
-       count(*) filter (where status <> 'completed')::int as all,
-       count(*) filter (where status <> 'completed'
-                          and $1::uuid is not null
-                          and assignee_id = $1::uuid)::int as assigned_to_me,
-       count(*) filter (where due_date is not null
-                          and (due_date - ${TODAY}) between 0 and 3
-                          and status not in ('approved','completed'))::int as due_soon,
-       count(*) filter (where coalesce(deadline, due_date) is not null
-                          and coalesce(deadline, due_date) < ${TODAY}
-                          and status not in ('approved','completed'))::int as overdue,
-       count(*) filter (where status in ('approved','completed'))::int as completed
-     from scoped`,
+    `select
+       count(*) filter (where $1::uuid is null or t.user_id = $1::uuid)::int as all,
+       count(*) filter (where $1::uuid is not null and t.user_id = $1::uuid)::int as assigned_to_me,
+       count(*) filter (where ($1::uuid is null or t.user_id = $1::uuid)
+                          and ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
+                          and t.status in ${OPEN})::int as overdue
+     from tasks t`,
     [who],
   )) as Record<string, number>[];
   const r = rows[0] ?? {};
   const n = (k: string) => Number(r[k] ?? 0);
-  return {
-    all: n('all'),
-    assigned_to_me: n('assigned_to_me'),
-    due_soon: n('due_soon'),
-    overdue: n('overdue'),
-    completed: n('completed'),
-  };
+  return { all: n('all'), assigned_to_me: n('assigned_to_me'), overdue: n('overdue') };
 }
 
-/** Date-scoped counts for the header's Today block, optionally per person. */
-export async function getToday(assignee?: string | null): Promise<TodayCounts> {
+/** Date-scoped counts for the header's Today block. */
+export async function getToday(user?: string | null): Promise<TodayCounts> {
   const db = requireSql();
-  const who = assignee && UUID_RE.test(assignee) ? assignee : null;
+  const who = user && UUID_RE.test(user) ? user : null;
   const rows = (await db.query(
     `select
        to_char(${TODAY}, 'YYYY-MM-DD') as date,
-       count(*) filter (where due_date = ${TODAY}
-                          and status not in ('approved','completed'))::int as due_today,
-       count(*) filter (where coalesce(deadline, due_date) is not null
-                          and coalesce(deadline, due_date) < ${TODAY}
-                          and status not in ('approved','completed'))::int as overdue,
-       count(*) filter (where (completed_at at time zone 'Asia/Kolkata')::date = ${TODAY})::int
-         as completed_today
+       count(*) filter (where t.due_date = ${TODAY} and t.status in ${OPEN})::int as due_today,
+       count(*) filter (where ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
+                          and t.status in ${OPEN})::int as overdue
      from tasks t
-     where $1::uuid is null
-        or t.assignee_id = $1::uuid
-        or exists (select 1 from task_collaborators c
-                    where c.task_id = t.id and c.user_id = $1::uuid)`,
+     where $1::uuid is null or t.user_id = $1::uuid`,
     [who],
   )) as Record<string, string | number>[];
   const r = rows[0] ?? {};
@@ -416,60 +350,46 @@ export async function getToday(assignee?: string | null): Promise<TodayCounts> {
     date: String(r.date),
     dueToday: Number(r.due_today ?? 0),
     overdue: Number(r.overdue ?? 0),
-    completedToday: Number(r.completed_today ?? 0),
   };
 }
 
-/** Tasks with two or more people on them, for the Working together block. */
-export async function getShared(assignee?: string | null): Promise<SharedTask[]> {
+/** Deadline within three days and still live — the At risk block. */
+export async function getAtRisk(user?: string | null): Promise<AtRiskTask[]> {
   const db = requireSql();
-  const who = assignee && UUID_RE.test(assignee) ? assignee : null;
+  const who = user && UUID_RE.test(user) ? user : null;
   const rows = (await db.query(
-    `select t.id, t.ref, t.title,
-            jsonb_agg(distinct jsonb_build_object('id', p.id, 'name', p.name)) as people
-     from tasks t
-     join lateral (
-       select ua.id, ua.name from users ua where ua.id = t.assignee_id
-       union
-       select uc.id, uc.name from task_collaborators c
-         join users uc on uc.id = c.user_id where c.task_id = t.id
-     ) p on true
-     where t.status not in ('approved','completed')
-       and exists (select 1 from task_collaborators c2 where c2.task_id = t.id)
-       and ($1::uuid is null
-            or t.assignee_id = $1::uuid
-            or exists (select 1 from task_collaborators c3
-                        where c3.task_id = t.id and c3.user_id = $1::uuid))
-     group by t.id, t.ref, t.title
-     order by t.due_date asc nulls last, t.ref asc`,
+    `select t.id, t.title, uo.name as user_name,
+            to_char(t.deadline_date, 'YYYY-MM-DD') as deadline_date
+     from tasks t join users uo on uo.id = t.user_id
+     where t.deadline_date is not null
+       and t.deadline_date between ${TODAY} and ${TODAY} + 3
+       and t.status in ${OPEN}
+       and ($1::uuid is null or t.user_id = $1::uuid)
+     order by t.deadline_date asc, t.title asc`,
     [who],
-  )) as Record<string, unknown>[];
+  )) as Record<string, string>[];
   return rows.map((r) => ({
     id: String(r.id),
-    ref: String(r.ref),
     title: String(r.title),
-    people: (r.people as { id: string; name: string }[]) ?? [],
+    userName: String(r.user_name),
+    deadlineDate: String(r.deadline_date),
   }));
 }
 
 // ---- Writes ----------------------------------------------------------------
 
 export interface TaskWriteInput {
+  userId: string;
   title: string;
-  description?: string | null;
-  type: TaskType;
-  status: TaskStatus;
   priority: TaskPriority;
-  assigneeId: string;
-  allocatedBy?: string | null;
+  status: TaskStatus;
+  allocationDate?: string | null;
+  dueDate?: string | null;
+  deadlineDate?: string | null;
   reportTo?: string | null;
   approverId?: string | null;
-  allocatedAt?: string | null;
-  dueDate?: string | null;
-  deadline?: string | null;
 }
 
-/** Writes one row per changed field. The audit trail is append-only. */
 async function recordActivity(
   taskId: string,
   actorId: string | null,
@@ -480,8 +400,11 @@ async function recordActivity(
   const params: unknown[] = [taskId, actorId && UUID_RE.test(actorId) ? actorId : null];
   const tuples = changes.map((c) => {
     const start = params.length;
-    params.push(c.field, c.oldValue == null ? null : String(c.oldValue),
-                c.newValue == null ? null : String(c.newValue));
+    params.push(
+      c.field,
+      c.oldValue == null ? null : String(c.oldValue),
+      c.newValue == null ? null : String(c.newValue),
+    );
     return `($1::uuid, $2::uuid, $${start + 1}, $${start + 2}, $${start + 3})`;
   });
   await db.query(
@@ -495,32 +418,35 @@ export async function createTask(
   input: TaskWriteInput,
   actorId: string | null,
 ): Promise<Task> {
-  await requireUser(input.assigneeId, 'assignee');
+  await requireUser(input.userId, 'assignee');
   const db = requireSql();
+
+  // report_to defaults to whoever the assignee reports to, but the caller can
+  // override it: task-level reporting is set per task.
+  let reportTo = input.reportTo ?? null;
+  if (reportTo === null) {
+    const owner = await getUser(input.userId);
+    reportTo = owner?.reportsTo ?? null;
+  }
 
   const rows = (await db.query(
     `insert into tasks
-       (title, description, type, status, priority, assignee_id, allocated_by,
-        report_to, approver_id, allocated_at, due_date, deadline,
-        completed_at, approved_at)
-     values ($1, $2, $12, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8::uuid,
-             coalesce($9::timestamptz, now()), $10::date, $11::date,
-             case when $3 in ('submitted','approved','completed') then now() end,
-             case when $3 in ('approved','completed') then now() end)
+       (user_id, title, priority, status, allocation_date, due_date,
+        deadline_date, report_to, approver_id, completed_at)
+     values ($1::uuid, $2, $3, $4, coalesce($5::date, ${TODAY}), $6::date,
+             $7::date, $8::uuid, $9::uuid,
+             case when $4 = 'completed' then now() end)
      returning id`,
     [
+      input.userId,
       input.title.trim(),
-      blank(input.description),
-      input.status,
       input.priority,
-      input.assigneeId,
-      input.allocatedBy ?? null,
-      input.reportTo ?? null,
-      input.approverId ?? null,
-      input.allocatedAt ?? null,
+      input.status,
+      input.allocationDate ?? null,
       input.dueDate ?? null,
-      input.deadline ?? null,
-      input.type,
+      input.deadlineDate ?? null,
+      reportTo,
+      input.approverId ?? null,
     ],
   )) as { id: string }[];
 
@@ -533,30 +459,25 @@ export async function createTask(
   return created;
 }
 
-/** Fields a PATCH may touch, mapped to their column. */
 const PATCHABLE: Record<string, string> = {
+  userId: 'user_id',
   title: 'title',
-  description: 'description',
-  type: 'type',
-  status: 'status',
   priority: 'priority',
-  assigneeId: 'assignee_id',
-  allocatedBy: 'allocated_by',
+  status: 'status',
+  allocationDate: 'allocation_date',
+  dueDate: 'due_date',
+  deadlineDate: 'deadline_date',
   reportTo: 'report_to',
   approverId: 'approver_id',
-  allocatedAt: 'allocated_at',
-  dueDate: 'due_date',
-  deadline: 'deadline',
 };
 
 const CASTS: Record<string, string> = {
-  assignee_id: '::uuid',
-  allocated_by: '::uuid',
+  user_id: '::uuid',
   report_to: '::uuid',
   approver_id: '::uuid',
-  allocated_at: '::timestamptz',
+  allocation_date: '::date',
   due_date: '::date',
-  deadline: '::date',
+  deadline_date: '::date',
 };
 
 export type TaskPatch = Partial<TaskWriteInput>;
@@ -571,30 +492,17 @@ export async function updateTask(
   const db = requireSql();
 
   const status = (patch.status ?? existing.status) as TaskStatus;
-  const dueDate = patch.dueDate !== undefined ? patch.dueDate : existing.dueDate;
-  const deadline = patch.deadline !== undefined ? patch.deadline : existing.deadline;
+  const due = patch.dueDate !== undefined ? patch.dueDate : existing.dueDate;
+  const deadline =
+    patch.deadlineDate !== undefined ? patch.deadlineDate : existing.deadlineDate;
 
   // Re-checked on the merged row: a one-field PATCH cannot be judged alone.
-  if (dueDate && deadline && deadline < dueDate) {
-    throw new TrackerError('Deadline cannot be earlier than the due date', 422);
+  if (due && deadline && deadline < due) {
+    throw new TrackerError('The deadline cannot be earlier than the due date', 422);
   }
 
-  // Only the task's approver may approve it. The UI disables the option, but
-  // the rule is enforced here too — a disabled <option> is not a boundary.
-  if (status === 'approved' && existing.status !== 'approved') {
-    if (!existing.approverId) {
-      throw new TrackerError('This task has no approver set', 422);
-    }
-    if (!actorId || actorId !== existing.approverId) {
-      throw new TrackerError(
-        `Only ${existing.approverName ?? 'the approver'} can approve this task`,
-        403,
-      );
-    }
-  }
-
-  if (patch.assigneeId !== undefined && patch.assigneeId)
-    await requireUser(patch.assigneeId, 'assignee');
+  if (patch.userId !== undefined && patch.userId)
+    await requireUser(patch.userId, 'assignee');
 
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -611,20 +519,19 @@ export async function updateTask(
     changes.push({ field: key, oldValue: prev, newValue: next });
   }
 
-  // completed_at and approved_at are derived from status, never sent by the
-  // client. Stamped on the way in, cleared on the way out — which also keeps
-  // the tasks_approved_at_matches_status constraint satisfied.
+  // completed_at is derived from status, never sent by the client. Approval is
+  // a separate action, so leaving `completed` also drops any approval — work
+  // that is no longer finished cannot stay signed off.
   if (patch.status !== undefined && patch.status !== existing.status) {
-    sets.push(
-      status === 'submitted' || status === 'approved' || status === 'completed'
-        ? 'completed_at = coalesce(completed_at, now())'
-        : 'completed_at = null',
-    );
-    sets.push(
-      status === 'approved' || status === 'completed'
-        ? 'approved_at = coalesce(approved_at, now())'
-        : 'approved_at = null',
-    );
+    if (status === 'completed') {
+      sets.push('completed_at = coalesce(completed_at, now())');
+    } else {
+      sets.push('completed_at = null');
+      if (existing.approvedAt) {
+        sets.push('approved_at = null');
+        changes.push({ field: 'approval', oldValue: 'approved', newValue: null });
+      }
+    }
   }
 
   if (sets.length === 0) return existing;
@@ -640,10 +547,48 @@ export async function updateTask(
   return getTask(id);
 }
 
+/**
+ * Approval, which is an action rather than a status.
+ *
+ * Only the task's own approver may sign work off, and only once it is actually
+ * completed. The UI disables the menu item, but a disabled item is not a
+ * boundary, so the rule is enforced here.
+ */
+export async function approveTask(
+  id: string,
+  actorId: string | null,
+): Promise<Task | null> {
+  const existing = await getTask(id);
+  if (!existing) return null;
+  const db = requireSql();
+
+  if (existing.status !== 'completed') {
+    throw new TrackerError('Only completed work can be approved', 422);
+  }
+  if (!existing.approverId) {
+    throw new TrackerError('This task has no approver set', 422);
+  }
+  if (!actorId || actorId !== existing.approverId) {
+    throw new TrackerError(
+      `Only ${existing.approverName ?? 'the approver'} can approve this task`,
+      403,
+    );
+  }
+  if (existing.approvedAt) return existing;
+
+  await db.query(
+    `update tasks set approved_at = now() where id = $1::uuid`,
+    [id],
+  );
+  await recordActivity(id, actorId, [
+    { field: 'approval', oldValue: null, newValue: 'approved' },
+  ]);
+  return getTask(id);
+}
+
 export async function deleteTask(id: string): Promise<boolean> {
   if (!UUID_RE.test(id)) return false;
   const db = requireSql();
-  // Collaborators and activity cascade with the task.
   const rows = (await db.query(
     `delete from tasks where id = $1::uuid returning id`,
     [id],
@@ -651,130 +596,67 @@ export async function deleteTask(id: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-// ---- Collaborators ---------------------------------------------------------
-
-export async function addCollaborator(
-  taskId: string,
-  input: { userId: string; role: CollaboratorRole; memberDueDate?: string | null },
-  actorId: string | null,
-): Promise<Task | null> {
-  const task = await getTask(taskId);
-  if (!task) return null;
-  await requireUser(input.userId, 'collaborator');
-  if (input.userId === task.assigneeId) {
-    throw new TrackerError('That person already owns this task', 422);
-  }
-  const db = requireSql();
-  const rows = (await db.query(
-    `insert into task_collaborators (task_id, user_id, role, member_due_date)
-     values ($1::uuid, $2::uuid, $3, $4::date)
-     on conflict (task_id, user_id) do nothing
-     returning user_id`,
-    [taskId, input.userId, input.role, input.memberDueDate ?? null],
-  )) as { user_id: string }[];
-  if (rows.length === 0) {
-    throw new TrackerError('That person is already on this task', 409);
-  }
-  await recordActivity(taskId, actorId, [
-    { field: 'collaborator_added', oldValue: null, newValue: input.userId },
-  ]);
-  return getTask(taskId);
-}
-
-export async function updateCollaborator(
-  taskId: string,
-  userId: string,
-  patch: { role?: CollaboratorRole; memberDueDate?: string | null },
-  actorId: string | null,
-): Promise<Task | null> {
-  if (!UUID_RE.test(taskId) || !UUID_RE.test(userId)) return null;
-  const db = requireSql();
-  const sets: string[] = [];
-  const params: unknown[] = [];
-  if (patch.role !== undefined) {
-    params.push(patch.role);
-    sets.push(`role = $${params.length}`);
-  }
-  if (patch.memberDueDate !== undefined) {
-    params.push(patch.memberDueDate ?? null);
-    sets.push(`member_due_date = $${params.length}::date`);
-  }
-  if (sets.length === 0) return getTask(taskId);
-
-  params.push(taskId, userId);
-  const rows = (await db.query(
-    `update task_collaborators set ${sets.join(', ')}
-     where task_id = $${params.length - 1}::uuid and user_id = $${params.length}::uuid
-     returning user_id`,
-    params,
-  )) as { user_id: string }[];
-  if (!rows[0]) return null;
-  await recordActivity(taskId, actorId, [
-    { field: 'collaborator_updated', oldValue: userId, newValue: JSON.stringify(patch) },
-  ]);
-  return getTask(taskId);
-}
-
-export async function removeCollaborator(
-  taskId: string,
-  userId: string,
-  actorId: string | null,
-): Promise<Task | null> {
-  if (!UUID_RE.test(taskId) || !UUID_RE.test(userId)) return null;
-  const db = requireSql();
-  const rows = (await db.query(
-    `delete from task_collaborators
-     where task_id = $1::uuid and user_id = $2::uuid returning user_id`,
-    [taskId, userId],
-  )) as { user_id: string }[];
-  if (!rows[0]) return null;
-  await recordActivity(taskId, actorId, [
-    { field: 'collaborator_removed', oldValue: userId, newValue: null },
-  ]);
-  return getTask(taskId);
-}
-
 // ---- User management -------------------------------------------------------
-// The team roster used to live as a list of names in the Settings record. It is
-// now this table, so Settings edits these rows and everything that needs names
-// derives them from here. One roster, one place.
 
 export interface UserWriteInput {
   name: string;
+  email?: string | null;
   designation?: string | null;
   department?: string | null;
-  email?: string | null;
+  reportsTo?: string | null;
   role?: 'ADMIN' | 'MEMBER';
   isActive?: boolean;
+}
+
+/**
+ * Would setting `reports_to` create a loop?
+ *
+ * Walks the proposed manager's own reporting chain: if the user appears
+ * anywhere in it, the change would close a cycle. Recursion is bounded by the
+ * chain itself, and Postgres stops a genuine loop rather than spinning.
+ */
+async function wouldCycle(userId: string, managerId: string): Promise<boolean> {
+  if (userId === managerId) return true;
+  const db = requireSql();
+  const rows = (await db.query(
+    `with recursive chain as (
+       select id, reports_to from users where id = $2::uuid
+       union
+       select u.id, u.reports_to from users u join chain c on u.id = c.reports_to
+     )
+     select exists (select 1 from chain where id = $1::uuid) as loops`,
+    [userId, managerId],
+  )) as { loops: boolean }[];
+  return Boolean(rows[0]?.loops);
 }
 
 export async function createUser(input: UserWriteInput): Promise<User> {
   const db = requireSql();
   const name = input.name.trim();
   if (!name) throw new TrackerError('A name is required', 422);
+  if (input.reportsTo) await requireUser(input.reportsTo, 'manager');
+
   try {
     const rows = (await db.query(
-      `insert into users (name, designation, department, email, role, is_active)
-       values ($1, $2, $3, $4, coalesce($5, 'MEMBER'), coalesce($6, true))
+      `insert into users (name, email, designation, department, reports_to, role, is_active)
+       values ($1, $2, $3, $4, $5::uuid, coalesce($6, 'MEMBER'), coalesce($7, true))
        returning id`,
       [
         name,
+        blank(input.email),
         blank(input.designation),
         blank(input.department),
-        blank(input.email),
+        input.reportsTo ?? null,
         input.role ?? null,
         input.isActive ?? null,
       ],
     )) as { id: string }[];
-    const created = (await listUsers(true)).find((u) => u.id === rows[0].id);
+    const created = await getUser(rows[0].id);
     if (!created) throw new Error('User vanished immediately after insert');
     return created;
   } catch (err) {
     if ((err as { code?: string }).code === '23505') {
-      throw new TrackerError(
-        `Somebody called "${name}" is already on the team`,
-        409,
-      );
+      throw new TrackerError('That name or email is already taken', 409);
     }
     throw err;
   }
@@ -785,27 +667,51 @@ export async function updateUser(
   patch: Partial<UserWriteInput>,
 ): Promise<User | null> {
   if (!UUID_RE.test(id)) return null;
+  const existing = await getUser(id);
+  if (!existing) return null;
   const db = requireSql();
+
+  if (patch.reportsTo !== undefined && patch.reportsTo) {
+    if (patch.reportsTo === id) {
+      throw new TrackerError('Somebody cannot report to themselves', 422);
+    }
+    await requireUser(patch.reportsTo, 'manager');
+    if (await wouldCycle(id, patch.reportsTo)) {
+      const manager = await getUser(patch.reportsTo);
+      throw new TrackerError(
+        `That would make a loop: ${manager?.name ?? 'that person'} already reports up to ${existing.name}.`,
+        422,
+      );
+    }
+  }
 
   const sets: string[] = [];
   const params: unknown[] = [];
-  const set = (column: string, value: unknown) => {
+  const changes: { field: string; oldValue: unknown; newValue: unknown }[] = [];
+  const set = (column: string, key: string, value: unknown, cast = '') => {
+    const prev = (existing as unknown as Record<string, unknown>)[key] ?? null;
+    if (String(prev ?? '') === String(value ?? '')) return;
     params.push(value);
-    sets.push(`${column} = $${params.length}`);
+    sets.push(`${column} = $${params.length}${cast}`);
+    changes.push({ field: key, oldValue: prev, newValue: value });
   };
 
   if (patch.name !== undefined) {
     const name = patch.name.trim();
     if (!name) throw new TrackerError('A name cannot be blank', 422);
-    set('name', name);
+    set('name', 'name', name);
   }
-  if (patch.designation !== undefined) set('designation', blank(patch.designation));
-  if (patch.department !== undefined) set('department', blank(patch.department));
-  if (patch.email !== undefined) set('email', blank(patch.email));
-  if (patch.role !== undefined) set('role', patch.role);
-  if (patch.isActive !== undefined) set('is_active', Boolean(patch.isActive));
+  if (patch.email !== undefined) set('email', 'email', blank(patch.email));
+  if (patch.designation !== undefined)
+    set('designation', 'designation', blank(patch.designation));
+  if (patch.department !== undefined)
+    set('department', 'department', blank(patch.department));
+  if (patch.reportsTo !== undefined)
+    set('reports_to', 'reportsTo', patch.reportsTo ?? null, '::uuid');
+  if (patch.role !== undefined) set('role', 'role', patch.role);
+  if (patch.isActive !== undefined) set('is_active', 'isActive', Boolean(patch.isActive));
 
-  if (sets.length === 0) return (await listUsers(true)).find((u) => u.id === id) ?? null;
+  if (sets.length === 0) return existing;
 
   sets.push('updated_at = now()');
   params.push(id);
@@ -821,43 +727,44 @@ export async function updateUser(
     }
     throw err;
   }
-  return (await listUsers(true)).find((u) => u.id === id) ?? null;
+
+  // User changes are logged the same way task changes are. There is no user_id
+  // column on task_activity, so they are filed against no task and identified
+  // by the field prefix.
+  if (changes.length > 0) {
+    const db2 = requireSql();
+    const params2: unknown[] = [];
+    const tuples = changes.map((c) => {
+      const start = params2.length;
+      params2.push(
+        `user.${c.field}`,
+        c.oldValue == null ? null : String(c.oldValue),
+        c.newValue == null ? null : String(c.newValue),
+        id,
+      );
+      return `($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}::uuid)`;
+    });
+    await db2
+      .query(
+        `insert into user_activity (field, old_value, new_value, user_id)
+         values ${tuples.join(', ')}`,
+        params2,
+      )
+      .catch(() => {
+        /* the log is best-effort; a failure here must not lose the edit */
+      });
+  }
+
+  return getUser(id);
 }
 
 /**
- * Removes someone from the roster.
+ * Deactivate, never delete.
  *
- * Refused while any work still points at them: their tasks, the tasks they
- * approve, and the archived Daily Work Log all reference this row, and deleting
- * it would either fail on the foreign key or erase history. Deactivating is the
- * right move for someone who has left — they stop appearing in pickers and
- * their work stays intact.
+ * Deleting orphans every task, reports_to link and approver reference the
+ * person appears on. Deactivated people vanish from the pickers while their
+ * work stays intact and readable.
  */
-export async function deleteUser(id: string): Promise<boolean> {
-  if (!UUID_RE.test(id)) return false;
-  const db = requireSql();
-
-  const refs = (await db.query(
-    `select
-       (select count(*) from tasks
-         where assignee_id = $1::uuid or allocated_by = $1::uuid
-            or report_to = $1::uuid or approver_id = $1::uuid)::int as tasks,
-       (select count(*) from task_collaborators where user_id = $1::uuid)::int as collabs,
-       (select count(*) from daily_logs_archive where user_id = $1::uuid)::int as archived`,
-    [id],
-  )) as Record<string, number>[];
-  const r = refs[0] ?? {};
-  const total = Number(r.tasks ?? 0) + Number(r.collabs ?? 0) + Number(r.archived ?? 0);
-  if (total > 0) {
-    throw new TrackerError(
-      `That person is on ${total} record${total === 1 ? '' : 's'}. Mark them inactive instead, which keeps their work and removes them from the pickers.`,
-      409,
-    );
-  }
-
-  const rows = (await db.query(
-    `delete from users where id = $1::uuid returning id`,
-    [id],
-  )) as { id: string }[];
-  return rows.length > 0;
+export async function deactivateUser(id: string): Promise<User | null> {
+  return updateUser(id, { isActive: false });
 }

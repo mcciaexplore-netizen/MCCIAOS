@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
   Trash2,
+  UserMinus,
   ChevronUp,
   ChevronDown,
   RotateCcw,
@@ -685,7 +686,7 @@ function TeamRoster() {
 
   const query = useQuery({
     queryKey: ['tracker-users', 'all'],
-    queryFn: () => trackerApi.users(true),
+    queryFn: () => trackerApi.users(false),
   });
   const users = query.data?.users ?? [];
 
@@ -713,11 +714,13 @@ function TeamRoster() {
     },
   });
 
-  const remove = useMutation({
-    mutationFn: (id: string) => trackerApi.removeUser(id),
+  // Deactivate, never delete. Removing somebody orphans every task, reports_to
+  // link and approver reference they appear on.
+  const deactivate = useMutation({
+    mutationFn: (id: string) => trackerApi.deactivateUser(id),
     onSuccess: () => {
       invalidate();
-      toast('Team member removed');
+      toast('Team member deactivated');
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });
@@ -754,6 +757,7 @@ function TeamRoster() {
 
       {adding && (
         <MemberForm
+          others={users.filter((u) => u.isActive)}
           pending={create.isPending}
           onCancel={() => setAdding(false)}
           onSave={(input) => create.mutateAsync(input).then(() => undefined)}
@@ -770,10 +774,16 @@ function TeamRoster() {
             <MemberRow
               key={u.id}
               user={u}
+              others={users.filter((o) => o.isActive && o.id !== u.id)}
               saving={update.isPending}
               onPatch={(patch) => update.mutate({ id: u.id, patch })}
-              onDelete={() => {
-                if (window.confirm(`Remove ${u.name} from the team?`)) remove.mutate(u.id);
+              onDeactivate={() => {
+                if (
+                  window.confirm(
+                    `Deactivate ${u.name}? They disappear from every picker, and their work stays intact.`,
+                  )
+                )
+                  deactivate.mutate(u.id);
               }}
             />
           ))}
@@ -785,14 +795,16 @@ function TeamRoster() {
 
 function MemberRow({
   user,
+  others,
   saving,
   onPatch,
-  onDelete,
+  onDeactivate,
 }: {
   user: User;
+  others: User[];
   saving: boolean;
   onPatch: (patch: UserUpdateInput) => void;
-  onDelete: () => void;
+  onDeactivate: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -816,8 +828,14 @@ function MemberRow({
             )}
           </p>
           <p className="truncate text-xs text-slate-400">
-            {[user.designation, user.department, user.email].filter(Boolean).join(' · ') ||
-              'No details yet'}
+            {[
+              user.designation,
+              user.department,
+              user.email,
+              user.reportsToName ? `reports to ${user.reportsToName}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'No details yet'}
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-1.5 text-xs text-slate-500">
@@ -833,18 +851,22 @@ function MemberRow({
         <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
           {open ? 'Close' : 'Edit'}
         </Button>
-        <button
-          onClick={onDelete}
-          aria-label={`Remove ${user.name}`}
-          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        {user.isActive && (
+          <button
+            onClick={onDeactivate}
+            aria-label={`Deactivate ${user.name}`}
+            title="Deactivate. People are never deleted, so their work survives."
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+          >
+            <UserMinus className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {open && (
         <MemberForm
           initial={user}
+          others={others}
           pending={saving}
           onCancel={() => setOpen(false)}
           onSave={async (input) => {
@@ -859,11 +881,14 @@ function MemberRow({
 
 function MemberForm({
   initial,
+  others,
   pending,
   onCancel,
   onSave,
 }: {
   initial?: User;
+  /** Everyone this person could report to. Never themselves. */
+  others: User[];
   pending: boolean;
   onCancel: () => void;
   onSave: (input: UserInput) => Promise<void>;
@@ -872,6 +897,7 @@ function MemberForm({
   const [designation, setDesignation] = useState(initial?.designation ?? '');
   const [department, setDepartment] = useState(initial?.department ?? '');
   const [email, setEmail] = useState(initial?.email ?? '');
+  const [reportsTo, setReportsTo] = useState(initial?.reportsTo ?? '');
   const [role, setRole] = useState<'ADMIN' | 'MEMBER'>(initial?.role ?? 'MEMBER');
   const [error, setError] = useState<string | null>(null);
 
@@ -880,16 +906,25 @@ function MemberForm({
       setError('A name is required');
       return;
     }
-    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError('Enter a valid email, or leave it blank');
+    // Required from now on, though the column stays nullable for the rows that
+    // predate this and have no address.
+    if (!email.trim()) {
+      setError('An email is required');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Enter a valid email');
       return;
     }
     setError(null);
+    // A longer reporting loop is caught server-side, which can walk the chain
+    // and name who already reports up to whom.
     await onSave({
       name: name.trim(),
       designation: designation.trim() || null,
       department: department.trim() || null,
-      email: email.trim() || null,
+      email: email.trim(),
+      reportsTo: reportsTo || null,
       role,
       isActive: initial?.isActive ?? true,
     });
@@ -915,12 +950,22 @@ function MemberForm({
             placeholder="Applied AI Studio"
           />
         </Field>
-        <Field label="Email">
+        <Field label="Email" required>
           <Input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Optional"
+            placeholder="name@mcciapune.com"
           />
+        </Field>
+        <Field label="Reports to" hint="A default for new tasks, overridable per task.">
+          <Select value={reportsTo} onChange={(e) => setReportsTo(e.target.value)}>
+            <option value="">Nobody</option>
+            {others.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value as 'ADMIN' | 'MEMBER')}>

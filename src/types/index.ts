@@ -181,93 +181,69 @@ export interface EventSummary {
 // Backed by its own tables (db/work-tracker.sql). Replaces the Daily Work Log,
 // whose data lives on in daily_logs_archive.
 
-/**
- * A team member. Seeded from the Settings roster; `email` is nullable because
- * the existing rows have none and inventing addresses would be fabricating
- * data. See db/work-tracker.sql.
- */
+/** A team member. Managed on the Settings page; the roster lives in `users`. */
 export interface User {
   id: string;
   name: string;
+  /**
+   * Nullable because the rows that already existed have none, and inventing
+   * addresses for real people would be fabricating data. Required by the
+   * Settings form for anyone added or edited from now on.
+   */
   email: string | null;
   role: 'ADMIN' | 'MEMBER';
   designation: string | null;
   department: string | null;
+  /** Line manager. A default suggestion for a task's reportTo, not a rule. */
   reportsTo: string | null;
+  reportsToName: string | null;
   avatarUrl: string | null;
   isActive: boolean;
 }
 
-/** The pipeline, in order. */
-export type TaskStatus =
-  | 'not_started'
-  | 'in_progress'
-  | 'blocked'
-  | 'submitted'
-  | 'approved'
-  | 'completed';
+/** The pipeline. Approval is a separate action, not a status. */
+export type TaskStatus = 'upcoming' | 'ongoing' | 'hold' | 'stopped' | 'completed';
 
-export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
-
-/** Issue type, shown as the coloured square in the first column. */
-export type TaskType = 'task' | 'bug' | 'story' | 'admin';
-
-export type CollaboratorRole = 'contributor' | 'reviewer';
-
-export interface TaskCollaborator {
-  taskId: string;
-  userId: string;
-  userName: string;
-  role: CollaboratorRole;
-  /** This person's own deadline, independent of the task due date. */
-  memberDueDate: string | null;
-  allocatedAt: string;
-}
+export type TaskPriority = 'high' | 'medium' | 'low';
 
 export interface Task {
   id: string;
-  /** Human reference, e.g. WT-0042. Assigned by a database trigger. */
-  ref: string;
+  /** The person doing the work. One person per task. */
+  userId: string;
+  userName: string;
   title: string;
-  description: string | null;
-  type: TaskType;
-  status: TaskStatus;
   priority: TaskPriority;
+  status: TaskStatus;
 
-  assigneeId: string;
-  assigneeName: string;
-  allocatedBy: string | null;
-  allocatedByName: string | null;
+  /** YYYY-MM-DD. When the work was given out. */
+  allocationDate: string | null;
+  /** YYYY-MM-DD. Working target. */
+  dueDate: string | null;
+  /** YYYY-MM-DD. Hard limit; never earlier than dueDate. */
+  deadlineDate: string | null;
+
   reportTo: string | null;
   reportToName: string | null;
   approverId: string | null;
   approverName: string | null;
 
-  allocatedAt: string;
-  /** YYYY-MM-DD. Working target. */
-  dueDate: string | null;
-  /** YYYY-MM-DD. Hard limit; never earlier than dueDate. */
-  deadline: string | null;
   completedAt: string | null;
   approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 
-  collaborators: TaskCollaborator[];
-
   // ---- Derived, computed per request; never stored -------------------------
   /**
    * Late: the deadline has passed (or the due date, when no deadline is set)
-   * and the task is not approved or completed. The working target slipping is
-   * not enough — see LATE_DATE in server/work-tracker.ts.
+   * and the work is still live. Stopped and completed work is never late.
    */
   isOverdue: boolean;
   /** Past the working target but still inside the deadline. */
   hasSlipped: boolean;
-  /** Whole days until due_date; negative when past. Null with no due date. */
+  /** The hard limit has passed and the work is not finished. */
+  pastDeadline: boolean;
+  /** Whole days until dueDate; negative when past. Null with no due date. */
   daysLeft: number | null;
-  /** Due within two days and not yet started, or blocked. */
-  atRisk: boolean;
 }
 
 /** One change to one field, for the activity trail. */
@@ -282,13 +258,11 @@ export interface TaskActivity {
   changedAt: string;
 }
 
-/** Counts for every tab, returned in one call so badges need one request. */
+/** Counts for every tab badge, returned in one call. */
 export interface TaskTabCounts {
   all: number;
   assigned_to_me: number;
-  due_soon: number;
   overdue: number;
-  completed: number;
 }
 
 /** Date-scoped counts for the header's Today block. */
@@ -296,13 +270,12 @@ export interface TodayCounts {
   date: string;
   dueToday: number;
   overdue: number;
-  completedToday: number;
 }
 
-/** A task with two or more people, for the Working together block. */
-export interface SharedTask {
+/** Deadline within three days and still live — the At risk block. */
+export interface AtRiskTask {
   id: string;
-  ref: string;
   title: string;
-  people: { id: string; name: string }[];
+  userName: string;
+  deadlineDate: string;
 }

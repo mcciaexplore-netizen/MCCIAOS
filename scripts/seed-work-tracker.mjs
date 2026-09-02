@@ -7,24 +7,25 @@
 // designations and emails are left as they are, because guessing a colleague's
 // job title is fabricating data about a real person.
 //
-// Seeded rows carry a marker in `description` so --clear can find them again.
+// Seeded rows are found again by title prefix, so --clear cannot touch real work.
 import { neon } from '../node_modules/@neondatabase/serverless/index.mjs';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL not set');
 const sql = neon(url);
 
-const MARKER = '[sample]';
+const PREFIX = '[sample] ';
+
+if (process.argv.includes('--clear')) {
+  const gone = await sql`delete from tasks where title like ${PREFIX + '%'} returning id`;
+  console.log(`removed ${gone.length} sample task(s)`);
+  process.exit(0);
+}
 
 const users = await sql`select id, name from users where is_active order by name`;
 if (users.length === 0) throw new Error('No users. Run db/work-tracker.sql first.');
 const by = (n) => users.find((u) => u.name === n)?.id ?? users[0].id;
-
-if (process.argv.includes('--clear')) {
-  const gone = await sql`delete from tasks where description like ${'%' + MARKER} returning ref`;
-  console.log(`removed ${gone.length} sample task(s)`);
-  process.exit(0);
-}
+const pick = (i) => users[i % users.length].id;
 
 // IST calendar day, so seeded dates line up with what the app computes.
 const today = new Intl.DateTimeFormat('en-CA', {
@@ -37,53 +38,40 @@ const shift = (d) => {
   return t.toISOString().slice(0, 10);
 };
 
-// Ten tasks covering every status, two of them shared.
+// Ten tasks covering all five statuses, plus overdue, at-risk and slipped rows.
 const TASKS = [
-  { type: 'story', title: 'Auto Cluster website — vendor deck',       owner: 'Rutuja', status: 'in_progress',  priority: 'high',     due: shift(6),  dl: shift(9),  approver: 'Sujal',  with: [['Taniya', 'contributor', shift(4)]] },
-  { type: 'bug', title: 'GST reconciliation fix for Kirloskar',      owner: 'Sujal',  status: 'blocked',      priority: 'critical', due: shift(-2), dl: shift(1),  approver: 'Ismail', with: [['Pratik', 'reviewer', null]] },
-  { type: 'task', title: 'Workshop confirmation calls — September',   owner: 'Taniya', status: 'not_started',  priority: 'medium',   due: shift(1),  dl: shift(3),  approver: 'Rutuja', with: [] },
-  { type: 'story', title: 'Web analytics dashboard — initial setup',   owner: 'Taniya', status: 'submitted',    priority: 'high',     due: shift(-1), dl: shift(2),  approver: 'Sujal',  with: [] },
-  { type: 'task', title: 'MSME data digitization — case studies',     owner: 'Rutuja', status: 'approved',     priority: 'medium',   due: shift(-5), dl: shift(-3), approver: 'Ismail', with: [] },
-  { type: 'task', title: 'Cluster calling list — August round',       owner: 'Rutuja', status: 'completed',    priority: 'low',      due: shift(-8), dl: shift(-6), approver: 'Ismail', with: [] },
-  { type: 'task', title: 'Social media creatives — festive set',      owner: 'Ziya',   status: 'in_progress',  priority: 'medium',   due: shift(4),  dl: shift(7),  approver: 'Taniya', with: [] },
-  { type: 'story', title: 'Consultation intake form rework',           owner: 'Pratik', status: 'not_started',  priority: 'low',      due: shift(11), dl: shift(14), approver: 'Sujal',  with: [] },
-  { type: 'admin', title: 'Mail merge for data dictionary outreach',   owner: 'Ismail', status: 'blocked',      priority: 'high',     due: shift(-3), dl: shift(0),  approver: 'Sujal',  with: [] },
-  { type: 'admin', title: 'Quarterly impact report — draft',           owner: 'Sujal',  status: 'not_started',  priority: 'critical', due: shift(2),  dl: shift(2),  approver: 'Ismail', with: [] },
+  { title: 'Auto Cluster website — vendor deck', who: 0, status: 'ongoing',   prio: 'high',   alloc: shift(-10), due: shift(6),  dl: shift(9)  },
+  { title: 'GST reconciliation fix for Kirloskar', who: 1, status: 'hold',     prio: 'high',   alloc: shift(-12), due: shift(-2), dl: shift(1)  },
+  { title: 'Workshop confirmation calls',          who: 2, status: 'upcoming', prio: 'medium', alloc: shift(-1),  due: shift(1),  dl: shift(3)  },
+  { title: 'Web analytics dashboard setup',        who: 3, status: 'ongoing',  prio: 'high',   alloc: shift(-8),  due: shift(-1), dl: shift(2)  },
+  { title: 'MSME data digitization case studies',  who: 4, status: 'completed',prio: 'medium', alloc: shift(-20), due: shift(-5), dl: shift(-3) },
+  { title: 'Cluster calling list — August round',  who: 0, status: 'completed',prio: 'low',    alloc: shift(-25), due: shift(-8), dl: shift(-6) },
+  { title: 'Social media creatives — festive set', who: 5, status: 'ongoing',  prio: 'medium', alloc: shift(-4),  due: shift(4),  dl: shift(7)  },
+  { title: 'Consultation intake form rework',      who: 6, status: 'stopped',  prio: 'low',    alloc: shift(-15), due: shift(-6), dl: shift(-4) },
+  { title: 'Mail merge for data dictionary',       who: 7, status: 'upcoming', prio: 'high',   alloc: shift(-6),  due: shift(-4), dl: shift(-2) },
+  { title: 'Quarterly impact report — draft',      who: 8, status: 'ongoing',  prio: 'high',   alloc: shift(-3),  due: shift(2),  dl: shift(2)  },
 ];
 
 let made = 0;
 for (const t of TASKS) {
+  const owner = pick(t.who);
+  const approver = pick(t.who + 1);
   const rows = await sql`
     insert into tasks
-      (title, description, type, status, priority, assignee_id, allocated_by, report_to,
-       approver_id, due_date, deadline, completed_at, approved_at)
+      (user_id, title, priority, status, allocation_date, due_date, deadline_date,
+       report_to, approver_id, completed_at)
     values (
-      ${t.title},
-      ${'Sample data for the Work Tracker. ' + MARKER},
-      ${t.type}, ${t.status}, ${t.priority},
-      ${by(t.owner)}::uuid, ${by('Sujal')}::uuid, ${by(t.approver)}::uuid,
-      ${by(t.approver)}::uuid,
-      ${t.due}::date, ${t.dl}::date,
-      ${['submitted', 'approved', 'completed'].includes(t.status) ? new Date().toISOString() : null}::timestamptz,
-      ${['approved', 'completed'].includes(t.status) ? new Date().toISOString() : null}::timestamptz
+      ${owner}::uuid, ${PREFIX + t.title}, ${t.prio}, ${t.status},
+      ${t.alloc}::date, ${t.due}::date, ${t.dl}::date,
+      ${approver}::uuid, ${approver}::uuid,
+      ${t.status === 'completed' ? new Date().toISOString() : null}::timestamptz
     )
-    returning id, ref`;
-  const task = rows[0];
-  made++;
-
-  for (const [name, role, memberDue] of t.with) {
-    await sql`
-      insert into task_collaborators (task_id, user_id, role, member_due_date)
-      values (${task.id}::uuid, ${by(name)}::uuid, ${role}, ${memberDue}::date)
-      on conflict do nothing`;
-  }
-
+    returning id`;
   await sql`
     insert into task_activity (task_id, actor_id, field, old_value, new_value)
-    values (${task.id}::uuid, ${by('Sujal')}::uuid, 'created', null, ${t.title})`;
+    values (${rows[0].id}::uuid, ${by(users[0].name)}::uuid, 'created', null, ${t.title})`;
+  made++;
 }
 
-const shared = await sql`
-  select count(distinct task_id)::int n from task_collaborators`;
-console.log(`seeded ${made} tasks, ${shared[0].n} of them shared`);
+console.log(`seeded ${made} tasks across ${users.length} people`);
 console.log('remove them again with:  node scripts/seed-work-tracker.mjs --clear');

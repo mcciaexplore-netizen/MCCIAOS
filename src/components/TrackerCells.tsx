@@ -17,31 +17,15 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { ArrowDown, ArrowUp, ChevronsUp, Equal } from 'lucide-react';
+import { ArrowDown, ArrowUp, Equal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   TASK_PRIORITY_COLOR,
   TASK_PRIORITY_LABELS,
   TASK_STATUS_LABELS,
   TASK_STATUS_LOZENGE,
-  TASK_TYPE_FILL,
-  TASK_TYPE_LABELS,
 } from '@/constants';
-import type { TaskPriority, TaskStatus, TaskType, User } from '@/types';
-
-// ---- Type square ----------------------------------------------------------
-
-/** 16x16 solid square, Jira's issue-type marker. */
-export function TypeSquare({ type }: { type: TaskType }) {
-  return (
-    <span
-      title={TASK_TYPE_LABELS[type]}
-      aria-label={TASK_TYPE_LABELS[type]}
-      style={{ background: TASK_TYPE_FILL[type], borderRadius: 3 }}
-      className="inline-block h-4 w-4 shrink-0"
-    />
-  );
-}
+import type { TaskPriority, TaskStatus, User } from '@/types';
 
 // ---- Avatar ---------------------------------------------------------------
 
@@ -170,21 +154,28 @@ export function Lozenge({ status }: { status: TaskStatus }) {
 // ---- Priority icon --------------------------------------------------------
 
 const PRIORITY_ICON = {
-  critical: ChevronsUp,
   high: ArrowUp,
   medium: Equal,
   low: ArrowDown,
 } as const;
 
-/** Icon only, 16px. The label lives in the tooltip, as in Jira. */
-export function PriorityIcon({ priority }: { priority: TaskPriority }) {
+/**
+ * Icon plus label. Jira's own list is icon-only, but the module spec asks for
+ * both here and the column is 110px, which holds it comfortably.
+ */
+export function PriorityMark({ priority }: { priority: TaskPriority }) {
   const Icon = PRIORITY_ICON[priority];
   return (
-    <Icon
-      className="h-4 w-4 shrink-0"
-      style={{ color: TASK_PRIORITY_COLOR[priority] }}
-      aria-label={TASK_PRIORITY_LABELS[priority]}
-    />
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <Icon
+        className="h-4 w-4 shrink-0"
+        style={{ color: TASK_PRIORITY_COLOR[priority] }}
+        aria-hidden
+      />
+      <span style={{ color: 'var(--n800)' }} className="text-sm">
+        {TASK_PRIORITY_LABELS[priority]}
+      </span>
+    </span>
   );
 }
 
@@ -373,6 +364,7 @@ export function EditableDate({
   min,
   overdue,
   slipped,
+  bold,
   ariaLabel,
 }: CellProps & {
   value: string | null;
@@ -382,6 +374,8 @@ export function EditableDate({
   overdue?: boolean;
   /** Working target passed, deadline still ahead. Amber, not red. */
   slipped?: boolean;
+  /** A blown hard deadline reads red and bold, per the spec. */
+  bold?: boolean;
   ariaLabel: string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -427,6 +421,7 @@ export function EditableDate({
         }}
         style={{
           color: overdue ? 'var(--r400)' : slipped ? 'var(--y400)' : 'var(--n200)',
+          fontWeight: bold ? 600 : undefined,
         }}
         className={cn(cellBase, 'tabular-nums')}
       >
@@ -438,6 +433,12 @@ export function EditableDate({
 
 // ---- User picker, avatar only ---------------------------------------------
 
+/**
+ * Avatar plus full name, behind a native select.
+ *
+ * The module spec asks for the name here rather than Jira's avatar-only
+ * treatment, and gives these columns 150-160px to hold it.
+ */
 export function UserCell({
   value,
   users,
@@ -457,17 +458,21 @@ export function UserCell({
   const current = users.find((u) => u.id === value);
   return (
     <CellShell saving={saving} error={error}>
-      <span className="relative inline-flex h-6 w-6 items-center">
-        <span className="pointer-events-none absolute inset-0 flex items-center">
+      <span className="relative flex min-w-0 items-center gap-1.5">
+        <span className="pointer-events-none absolute inset-0 flex items-center gap-1.5">
           {current ? (
-            <Avatar name={current.name} size={24} />
+            <>
+              <Avatar name={current.name} size={24} />
+              <span
+                style={{ color: 'var(--n800)' }}
+                className="min-w-0 flex-1 truncate text-sm"
+              >
+                {current.name}
+              </span>
+            </>
           ) : (
-            <span
-              style={{ background: 'var(--n30)', color: 'var(--n200)' }}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px]"
-              title="Nobody"
-            >
-              ?
+            <span style={{ color: 'var(--n200)' }} className="pl-1 text-sm">
+              Nobody
             </span>
           )}
         </span>
@@ -477,7 +482,7 @@ export function UserCell({
           data-cell
           aria-label={ariaLabel}
           onChange={(e) => onSave(e.target.value === '' ? null : e.target.value)}
-          className="h-6 w-6 cursor-pointer rounded-full border-0 bg-transparent text-transparent opacity-0 focus:opacity-100 focus:outline-none"
+          className="w-full cursor-pointer rounded-[3px] border border-transparent bg-transparent py-0.5 text-transparent hover:border-[color:var(--n40)] focus:outline-none"
         >
           {allowEmpty && <option value="">Nobody</option>}
           {users.map((u) => (

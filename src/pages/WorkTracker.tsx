@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   Columns3,
   Loader2,
   MoreHorizontal,
   Plus,
+  Settings as SettingsIcon,
   Trash2,
   Users2,
   X,
@@ -22,123 +24,100 @@ import {
   EditableText,
   IconSelect,
   Lozenge,
-  PriorityIcon,
-  ReadOnlyDate,
-  TypeSquare,
+  PriorityMark,
   UserCell,
+  formatJiraDate,
 } from '@/components/TrackerCells';
 import { useToast } from '@/components/Toast';
 import { trackerApi, type TabKey } from '@/lib/workTrackerApi';
 import {
-  COLLABORATOR_ROLES,
-  COLLABORATOR_ROLE_LABELS,
   TASK_PRIORITIES,
   TASK_PRIORITY_LABELS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
-  TASK_TYPES,
-  TASK_TYPE_LABELS,
 } from '@/constants';
 import { istToday } from '@/lib/ist';
-import { formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
-import type {
-  CollaboratorRole,
-  Task,
-  TaskPriority,
-  TaskStatus,
-  TaskType,
-  User,
-} from '@/types';
+import type { AtRiskTask, Task, TaskPriority, TaskStatus, User } from '@/types';
 
-// DESIGN NOTE. The table is built to Atlassian/Jira anatomy exactly as the
-// module spec asks — Jira neutrals, 32px rows, filled lozenges, icon-only
-// priority, avatar-only people. Those tokens are scoped to `.jira-table` in
-// src/index.css so the surrounding MCCIA shell, nav and buttons keep their own
-// language: the spec asks for both, and scoping is what lets both be true.
-//
-// Dark mode is kept rather than dropped: spec 6.6 puts it out of scope "unless
-// MCCIA OS already has it", and it does (there is a theme toggle in the header).
+// DESIGN NOTE. The table is Atlassian/Jira anatomy: Jira neutrals, 32px rows,
+// filled lozenges, a border-bottom and no colour bar. Those tokens are scoped
+// to `.jira-table` in src/index.css so the surrounding MCCIA shell keeps its
+// own language. Two deliberate departures the module spec asks for: the people
+// columns show avatar plus name rather than avatar alone, and priority is icon
+// plus label rather than icon alone.
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'all', label: 'All work' },
   { key: 'assigned_to_me', label: 'Assigned to me' },
-  { key: 'due_soon', label: 'Due soon' },
   { key: 'overdue', label: 'Overdue' },
-  { key: 'completed', label: 'Completed' },
 ];
 
-// Jira's column order, with the assignee-first requirement honoured by putting
-// people immediately after the summary. Type and key are 104px together, so the
-// assignee is still visible without scrolling.
-//
-// Summary is given a fixed width rather than flexing: the first four columns
-// are sticky, and a sticky column needs a known left offset, which a flexible
-// neighbour cannot provide.
+/**
+ * Ten columns, in the order the spec gives. Name is the only sticky one; the
+ * rest scroll horizontally past it.
+ *
+ * Title is given a fixed width rather than flexing: a sticky neighbour needs a
+ * known left offset, which a flexible column cannot provide.
+ */
 const COLUMNS = [
-  { sticky: true, key: 'type', label: 'Type', width: 34, hideLabel: true },
-  { sticky: true, key: 'ref', label: 'Key', width: 78, hideLabel: false },
-  { sticky: true, key: 'title', label: 'Summary', width: 340, hideLabel: false },
-  { sticky: true, key: 'assignee', label: 'Assignee', width: 40, hideLabel: false },
-  { sticky: false, key: 'with', label: 'With', width: 60, hideLabel: false },
-  { sticky: false, key: 'status', label: 'Status', width: 110, hideLabel: false },
-  { sticky: false, key: 'priority', label: 'Priority', width: 36, hideLabel: true },
-  { sticky: false, key: 'allocatedAt', label: 'Allocated', width: 90, hideLabel: false },
-  { sticky: false, key: 'dueDate', label: 'Due', width: 90, hideLabel: false },
-  { sticky: false, key: 'deadline', label: 'Deadline', width: 90, hideLabel: false },
-  { sticky: false, key: 'completedAt', label: 'Completed', width: 90, hideLabel: false },
-  { sticky: false, key: 'reportTo', label: 'Reports to', width: 40, hideLabel: false },
-  { sticky: false, key: 'approverId', label: 'Approver', width: 40, hideLabel: false },
-  { sticky: false, key: 'approvedAt', label: 'Approved', width: 90, hideLabel: false },
+  { key: 'name', label: 'Name', width: 160, sticky: true, sort: 'name' },
+  { key: 'title', label: 'Title', width: 340, sticky: false, sort: 'title' },
+  { key: 'priority', label: 'Priority', width: 110, sticky: false, sort: '' },
+  { key: 'status', label: 'Status', width: 120, sticky: false, sort: '' },
+  { key: 'allocation', label: 'Allocation', width: 110, sticky: false, sort: 'allocation' },
+  { key: 'due', label: 'Due', width: 110, sticky: false, sort: 'due' },
+  { key: 'deadline', label: 'Deadline', width: 110, sticky: false, sort: 'deadline' },
+  { key: 'reportTo', label: 'Reports to', width: 150, sticky: false, sort: '' },
+  { key: 'approver', label: 'Approver', width: 150, sticky: false, sort: '' },
 ] as const;
 
 type ColumnKey = (typeof COLUMNS)[number]['key'];
-
-/**
- * Left offsets for the sticky block, summed over the columns actually visible —
- * hiding Key must not leave Assignee floating at the wrong offset.
- */
-function stickyOffsets(visible: (k: ColumnKey) => boolean): Partial<Record<ColumnKey, number>> {
-  const out: Partial<Record<ColumnKey, number>> = {};
-  let x = 0;
-  for (const c of COLUMNS) {
-    if (!c.sticky || !visible(c.key)) continue;
-    out[c.key] = x;
-    x += c.width;
-  }
-  return out;
-}
 const COLUMN_PREF_KEY = 'mccia.tracker.columns';
-
-// Everyone adds their own work daily, so landing on "All team" and making them
-// pick themselves first is a step repeated every day. The last person chosen is
-// remembered and reapplied. A pasted ?assignee= link still wins, because the
-// URL is read first. Empty means All team, which is remembered as a deliberate
-// choice rather than treated as "nothing stored".
+// Whose work is on screen, remembered so each person lands on their own list.
 const PERSON_PREF_KEY = 'mccia.tracker.person';
-// Who is adding work. Separate from whose work is on screen, so you can look at
-// a colleague's list while filing your own. Remembered per device.
+// Who is filing the work. Separate, so you can read a colleague's list while
+// adding your own.
 const I_AM_PREF_KEY = 'mccia.tracker.iam';
 
-function readStoredPerson(): string | null {
+/** Closes a popover on Escape, matching SlideOver and Modal. */
+function useEscape(open: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+}
+
+const readStored = (key: string): string | null => {
   try {
-    return localStorage.getItem(PERSON_PREF_KEY);
+    return localStorage.getItem(key);
   } catch {
     return null; // private mode
   }
-}
+};
+const writeStored = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode; the preference just will not persist */
+  }
+};
 
 /** Everything that scopes the view lives in the URL, so a view is shareable. */
 function useTrackerParams() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') ?? 'all') as TabKey;
-  // `has` rather than `get`: ?assignee= (deliberately blank) must mean All team
-  // and not fall through to the remembered person.
-  const assignee = params.has('assignee')
-    ? (params.get('assignee') ?? '')
-    : (readStoredPerson() ?? '');
+  // `has` rather than `get`: ?user= (deliberately blank) means everyone and
+  // must not fall through to the remembered person.
+  const user = params.has('user') ? (params.get('user') ?? '') : (readStored(PERSON_PREF_KEY) ?? '');
   const status = params.get('status') ?? '';
   const priority = params.get('priority') ?? '';
+  const sort = params.get('sort') ?? '';
+  const dir = (params.get('dir') ?? 'asc') as 'asc' | 'desc';
 
   const set = useCallback(
     (next: Record<string, string>) => {
@@ -152,61 +131,45 @@ function useTrackerParams() {
     [params, setParams],
   );
 
-  return { tab, assignee, status, priority, set, urlHasAssignee: params.has('assignee') };
+  return { tab, user, status, priority, sort, dir, set, urlHasUser: params.has('user') };
 }
 
 export default function WorkTracker() {
-  const { tab, assignee, status, priority, set, urlHasAssignee } = useTrackerParams();
+  const { tab, user, status, priority, sort, dir, set, urlHasUser } = useTrackerParams();
   const qc = useQueryClient();
   const { toast } = useToast();
 
-  const [iAm, setIAmState] = useState<string>(() => {
-    try {
-      return localStorage.getItem(I_AM_PREF_KEY) ?? '';
-    } catch {
-      return '';
-    }
-  });
-  const setIAm = useCallback((id: string) => {
-    setIAmState(id);
-    try {
-      localStorage.setItem(I_AM_PREF_KEY, id);
-    } catch {
-      /* private mode; the preference just will not persist */
-    }
-  }, []);
-
-  // "I am" is who the app treats as the current user, since there is no
-  // session: it files new work and gates the approve permission. A label,
-  // never a security boundary.
-  const actor = iAm || undefined;
-
-  // Remember whoever is selected, and reflect a remembered person back into the
-  // URL so the view stays shareable and a refresh keeps it.
-  useEffect(() => {
-    try {
-      localStorage.setItem(PERSON_PREF_KEY, assignee);
-    } catch {
-      /* private mode; the preference just will not persist */
-    }
-    if (!urlHasAssignee && assignee) set({ assignee });
-  }, [assignee, urlHasAssignee, set]);
-
   const usersQuery = useQuery({ queryKey: ['tracker-users'], queryFn: () => trackerApi.users() });
   const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
+
+  const [iAm, setIAmState] = useState<string>(() => readStored(I_AM_PREF_KEY) ?? '');
+  const setIAm = useCallback((id: string) => {
+    setIAmState(id);
+    writeStored(I_AM_PREF_KEY, id);
+  }, []);
 
   // Settle on someone once the roster arrives: whoever is being viewed, else
   // the first member. Never leaves the New task row without an owner.
   useEffect(() => {
     if (iAm && users.some((u) => u.id === iAm)) return;
-    const next = users.find((u) => u.id === assignee)?.id ?? users[0]?.id;
+    const next = users.find((u) => u.id === user)?.id ?? users[0]?.id;
     if (next) setIAm(next);
-  }, [users, assignee, iAm, setIAm]);
+  }, [users, user, iAm, setIAm]);
 
+  // Remember whoever is selected, and reflect it back into the URL so the view
+  // stays shareable and a refresh keeps it.
+  useEffect(() => {
+    writeStored(PERSON_PREF_KEY, user);
+    if (!urlHasUser && user) set({ user });
+  }, [user, urlHasUser, set]);
+
+  // "I am" is who the app treats as the current user, since there is no
+  // session: it files new work and gates approval. A label, not a boundary.
+  const actor = iAm || undefined;
 
   const filters = useMemo(
-    () => ({ tab, assignee, status, priority }),
-    [tab, assignee, status, priority],
+    () => ({ tab, user, status, priority, sort, dir }),
+    [tab, user, status, priority, sort, dir],
   );
 
   const tasksQuery = useQuery({
@@ -214,16 +177,16 @@ export default function WorkTracker() {
     queryFn: () => trackerApi.tasks(filters),
   });
   const counts = useQuery({
-    queryKey: ['tracker-summary', assignee],
-    queryFn: () => trackerApi.summary(assignee || undefined),
+    queryKey: ['tracker-summary', user],
+    queryFn: () => trackerApi.summary(user || undefined),
   });
   const today = useQuery({
-    queryKey: ['tracker-today', assignee],
-    queryFn: () => trackerApi.today(assignee || undefined),
+    queryKey: ['tracker-today', user],
+    queryFn: () => trackerApi.today(user || undefined),
   });
-  const shared = useQuery({
-    queryKey: ['tracker-shared', assignee],
-    queryFn: () => trackerApi.shared(assignee || undefined),
+  const atRisk = useQuery({
+    queryKey: ['tracker-at-risk', user],
+    queryFn: () => trackerApi.atRisk(user || undefined),
   });
 
   const tasks = tasksQuery.data?.tasks ?? [];
@@ -247,7 +210,7 @@ export default function WorkTracker() {
   const refreshAside = () => {
     qc.invalidateQueries({ queryKey: ['tracker-summary'] });
     qc.invalidateQueries({ queryKey: ['tracker-today'] });
-    qc.invalidateQueries({ queryKey: ['tracker-shared'] });
+    qc.invalidateQueries({ queryKey: ['tracker-at-risk'] });
   };
 
   /**
@@ -272,11 +235,7 @@ export default function WorkTracker() {
       const snapshot = qc.getQueryData(['tasks', filters]);
       qc.setQueryData<{ tasks: Task[] }>(['tasks', filters], (old) =>
         old
-          ? {
-              tasks: old.tasks.map((t) =>
-                t.id === id ? ({ ...t, [field]: value } as Task) : t,
-              ),
-            }
+          ? { tasks: old.tasks.map((t) => (t.id === id ? ({ ...t, [field]: value } as Task) : t)) }
           : old,
       );
       return { snapshot, key };
@@ -324,6 +283,15 @@ export default function WorkTracker() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
+  const approve = useMutation({
+    mutationFn: (id: string) => trackerApi.approve(id, actor),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      toast('Approved');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   // ---- Column visibility ---------------------------------------------------
   const [hidden, setHidden] = useState<Set<ColumnKey>>(() => {
     try {
@@ -334,21 +302,15 @@ export default function WorkTracker() {
     }
   });
   useEffect(() => {
-    try {
-      localStorage.setItem(COLUMN_PREF_KEY, JSON.stringify([...hidden]));
-    } catch {
-      /* private mode; the preference just will not persist */
-    }
+    writeStored(COLUMN_PREF_KEY, JSON.stringify([...hidden]));
   }, [hidden]);
-  const visible = (k: ColumnKey) => !hidden.has(k);
+  const visible = useCallback((k: ColumnKey) => !hidden.has(k), [hidden]);
 
-  const offsets = useMemo(() => stickyOffsets(visible), [hidden]);
   const [showColumns, setShowColumns] = useState(false);
+  useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
   const [activityFor, setActivityFor] = useState<Task | null>(null);
-  const [collabFor, setCollabFor] = useState<string | null>(null);
 
-  const viewingUser = users.find((u) => u.id === assignee) ?? null;
   const anyFilter = Boolean(status || priority || tab !== 'all');
 
   // ---- Keyboard grid navigation -------------------------------------------
@@ -356,7 +318,6 @@ export default function WorkTracker() {
   const onGridKey = (e: React.KeyboardEvent<HTMLTableElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
     const target = e.target as HTMLElement;
-    // Let arrows work normally inside an open text field.
     if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'text') return;
 
     const cells = Array.from(
@@ -364,7 +325,8 @@ export default function WorkTracker() {
     );
     const i = cells.indexOf(target);
     if (i === -1) return;
-    const perRow = tableRef.current?.querySelectorAll('tbody tr:first-child [data-cell]').length ?? 1;
+    const perRow =
+      tableRef.current?.querySelectorAll('tbody tr:first-child [data-cell]').length ?? 1;
 
     let next = i;
     if (e.key === 'ArrowLeft') next = i - 1;
@@ -379,6 +341,12 @@ export default function WorkTracker() {
 
   const isLoading = tasksQuery.isLoading || usersQuery.isLoading;
   const loadError = (tasksQuery.error ?? usersQuery.error) as Error | null;
+  const viewed = users.find((u) => u.id === user) ?? null;
+
+  const sortBy = (key: string) => {
+    if (!key) return;
+    set(sort === key ? { sort: key, dir: dir === 'asc' ? 'desc' : 'asc' } : { sort: key, dir: 'asc' });
+  };
 
   return (
     <div>
@@ -388,11 +356,7 @@ export default function WorkTracker() {
         actions={
           <>
             <div className="relative">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setShowColumns((v) => !v)}
-              >
+              <Button size="sm" variant="secondary" onClick={() => setShowColumns((v) => !v)}>
                 <Columns3 className="h-4 w-4" /> Columns
               </Button>
               {showColumns && (
@@ -424,32 +388,24 @@ export default function WorkTracker() {
                 </>
               )}
             </div>
+            {/* Team and reporting lines live on the one admin page, behind the
+                passcode, next to the other vocabularies. */}
+            <Link
+              to="/settings?tab=team"
+              title="Team settings"
+              aria-label="Team settings"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+            >
+              <SettingsIcon className="h-[18px] w-[18px]" />
+            </Link>
           </>
         }
       />
 
-      {/* ---- Two blocks: whose work is on screen, and who is adding ---- */}
-      <div className="mb-4 grid items-start gap-3 min-[900px]:grid-cols-2">
-        <GroupBlock
-          users={users}
-          selected={assignee}
-          loading={usersQuery.isLoading}
-          counts={counts.data}
-          onSelect={(id) => set({ assignee: id })}
-        />
-        <IAmBlock
-          users={users}
-          selected={iAm}
-          loading={usersQuery.isLoading}
-          onSelect={setIAm}
-          onAdd={() => setAdding(true)}
-        />
-      </div>
-
       {/* ---- Tabs ---- */}
       <div className="mb-4 overflow-x-auto">
         <div className="inline-flex gap-1 rounded-full bg-slate-100 p-1 dark:bg-slate-800">
-          {TABS.filter((t) => t.key !== 'assigned_to_me' || assignee).map((t) => {
+          {TABS.filter((t) => t.key !== 'assigned_to_me' || user).map((t) => {
             const n = counts.data?.[t.key];
             const active = tab === t.key;
             return (
@@ -480,15 +436,33 @@ export default function WorkTracker() {
         </div>
       </div>
 
-      {/* Status and priority moved onto the column headers, so this row carries
-          only the save state and a way out of an active filter. */}
+      {/* ---- Header blocks. Stack below 900px. ---- */}
+      <div className="mb-4 grid items-start gap-3 min-[900px]:grid-cols-2 min-[1400px]:grid-cols-4">
+        <GroupBlock
+          users={users}
+          selected={user}
+          loading={usersQuery.isLoading}
+          counts={counts.data}
+          onSelect={(id) => set({ user: id })}
+        />
+        <IAmBlock
+          users={users}
+          selected={iAm}
+          loading={usersQuery.isLoading}
+          onSelect={setIAm}
+          onAdd={() => setAdding(true)}
+        />
+        <TodayBlock
+          data={today.data}
+          loading={today.isLoading}
+          onPick={(t) => set({ tab: t })}
+        />
+        <AtRiskBlock tasks={atRisk.data?.tasks ?? []} loading={atRisk.isLoading} />
+      </div>
+
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {anyFilter && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => set({ tab: '', status: '', priority: '' })}
-          >
+          <Button variant="ghost" size="sm" onClick={() => set({ tab: '', status: '', priority: '' })}>
             Clear filters
           </Button>
         )}
@@ -514,7 +488,6 @@ export default function WorkTracker() {
         </div>
       )}
 
-      {/* ---- Table (desktop) / cards (mobile) ---- */}
       <Card className="overflow-hidden">
         {isLoading ? (
           <TableSkeleton />
@@ -523,7 +496,7 @@ export default function WorkTracker() {
             <EmptyState
               icon={<Users2 className="h-10 w-10" />}
               title="No team members yet"
-              description="The roster is seeded from the team list on the Settings page."
+              description="Add people in Settings, then work can be assigned to them."
             />
           </div>
         ) : tasks.length === 0 && !adding ? (
@@ -533,8 +506,8 @@ export default function WorkTracker() {
               title={
                 anyFilter
                   ? 'No tasks match these filters.'
-                  : viewingUser
-                    ? `No work assigned to ${viewingUser.name} yet.`
+                  : viewed
+                    ? `No work assigned to ${viewed.name} yet.`
                     : 'No work tracked yet.'
               }
               action={
@@ -542,7 +515,7 @@ export default function WorkTracker() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => set({ tab: '', assignee: '', status: '', priority: '' })}
+                    onClick={() => set({ tab: '', status: '', priority: '' })}
                   >
                     Clear filters
                   </Button>
@@ -556,11 +529,10 @@ export default function WorkTracker() {
           </div>
         ) : (
           <>
-            {/* Desktop table. Horizontal scroll past the sticky assignee column. */}
             <div className="jira-table hidden max-h-[70vh] overflow-auto md:block">
               <table ref={tableRef} onKeyDown={onGridKey} className="w-full border-collapse text-left">
-                {/* Headers stay put on vertical scroll, sticky columns on
-                    horizontal. z-30 for the corner cells so they win both. */}
+                {/* Headers stay put on vertical scroll, the Name column on
+                    horizontal. z-30 for the corner cell so it wins both. */}
                 <thead className="sticky top-0 z-20">
                   <tr>
                     {COLUMNS.filter((c) => visible(c.key)).map((c) => (
@@ -569,16 +541,10 @@ export default function WorkTracker() {
                         style={{
                           width: c.width,
                           minWidth: c.width,
-                          left: c.sticky ? offsets[c.key] : undefined,
+                          left: c.sticky ? 0 : undefined,
                         }}
-                        className={cn(
-                          'whitespace-nowrap',
-                          c.sticky && 'sticky z-30',
-                        )}
+                        className={cn('whitespace-nowrap', c.sticky && 'sticky z-30')}
                       >
-                        {/* Status and priority filter from their own header, as
-                            in Jira, which keeps the filters out of the header
-                            strip without losing them. */}
                         {c.key === 'status' ? (
                           <HeaderFilter
                             label="Status"
@@ -590,31 +556,32 @@ export default function WorkTracker() {
                         ) : c.key === 'priority' ? (
                           <HeaderFilter
                             label="Priority"
-                            hideLabel
                             value={priority}
                             options={TASK_PRIORITIES}
                             labels={TASK_PRIORITY_LABELS}
                             onChange={(v) => set({ priority: v })}
                           />
+                        ) : c.sort ? (
+                          <HeaderSort
+                            label={c.label}
+                            active={sort === c.sort}
+                            dir={dir}
+                            onClick={() => sortBy(c.sort)}
+                          />
                         ) : (
-                          /* The icon-only columns hide their label so the column
-                             can hold the spec width; screen readers still get it. */
-                          <span className={c.hideLabel ? 'sr-only' : undefined}>
-                            {c.label}
-                          </span>
+                          c.label
                         )}
                       </th>
                     ))}
                     <th style={{ width: 32, minWidth: 32 }} />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className="divide-y-0">
                   {adding && (
                     <NewTaskRow
                       users={users}
                       visible={visible}
-                      defaultAssignee={iAm || assignee || users[0]?.id}
-                      actor={actor}
+                      defaultUser={iAm || user || users[0]?.id}
                       pending={create.isPending}
                       onCancel={() => setAdding(false)}
                       onCreate={async (input) => {
@@ -630,14 +597,13 @@ export default function WorkTracker() {
                       users={users}
                       actor={actor}
                       visible={visible}
-                      offsets={offsets}
                       savingCells={savingCells}
                       cellErrors={cellErrors}
                       onSave={save}
                       onActivity={() => setActivityFor(t)}
-                      onCollab={() => setCollabFor(t.id)}
+                      onApprove={() => approve.mutate(t.id)}
                       onDelete={() => {
-                        if (window.confirm(`Delete ${t.ref}? This cannot be undone.`))
+                        if (window.confirm(`Delete "${t.title}"? This cannot be undone.`))
                           remove.mutate(t.id);
                       }}
                     />
@@ -646,31 +612,262 @@ export default function WorkTracker() {
               </table>
             </div>
 
-            {/* Mobile cards. A 13-column table does not scroll usefully on a phone. */}
+            {/* A ten-column table does not scroll usefully on a phone. */}
             <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
               {tasks.map((t) => (
-                <MobileCard key={t.id} task={t} users={users} onSave={save} />
+                <MobileCard key={t.id} task={t} onSave={save} />
               ))}
             </ul>
           </>
         )}
       </Card>
 
-      {collabFor && (
-        <CollaboratorPanel
-          task={tasks.find((t) => t.id === collabFor) ?? null}
-          users={users}
-          actor={actor}
-          onClose={() => setCollabFor(null)}
-          onChanged={() => {
-            qc.invalidateQueries({ queryKey: ['tasks'] });
-            refreshAside();
-          }}
-        />
-      )}
-
       <ActivityPanel task={activityFor} onClose={() => setActivityFor(null)} />
     </div>
+  );
+}
+
+// ---- Header blocks ---------------------------------------------------------
+
+/**
+ * Whose work is on screen. Collapsed it names the person; opening it lists
+ * everyone, so picking is one click rather than hunting a dropdown.
+ */
+function GroupBlock({
+  users,
+  selected,
+  loading,
+  counts,
+  onSelect,
+}: {
+  users: User[];
+  selected: string;
+  loading: boolean;
+  counts?: { all: number; overdue: number };
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  useEscape(open, () => setOpen(false));
+  const person = users.find((u) => u.id === selected) ?? null;
+
+  return (
+    <Card className="p-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-slate-800"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Group</p>
+          {loading ? (
+            <span className="mt-1 block h-5 w-32 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          ) : person ? (
+            <>
+              <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
+                {person.name}
+              </p>
+              <p className="truncate text-xs text-slate-400">
+                {person.designation ?? 'No designation set'}
+                {counts ? ` · ${counts.all} open` : ''}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-slate-900 dark:text-slate-100">Everyone</p>
+              <p className="truncate text-xs text-slate-400">
+                {users.length} {users.length === 1 ? 'person' : 'people'}
+                {counts ? ` · ${counts.all} open` : ''}
+              </p>
+            </>
+          )}
+        </div>
+        {person ? (
+          <Avatar name={person.name} size={32} />
+        ) : (
+          users.length > 0 && <AvatarStack people={users.map((u) => ({ name: u.name }))} max={3} />
+        )}
+        <ChevronDown
+          className={cn('h-4 w-4 shrink-0 text-slate-400 transition-transform', open && 'rotate-180')}
+        />
+      </button>
+
+      {open && (
+        <ul className="mt-2 max-h-52 overflow-y-auto border-t border-slate-100 pt-2 dark:border-slate-800">
+          <li>
+            <button
+              onClick={() => {
+                onSelect('');
+                setOpen(false);
+              }}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
+                !selected && 'font-medium text-brand-700 dark:text-brand-300',
+              )}
+            >
+              <Users2 className="h-4 w-4 text-slate-400" />
+              Everyone
+            </button>
+          </li>
+          {users.map((u) => (
+            <li key={u.id}>
+              <button
+                onClick={() => {
+                  onSelect(u.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
+                  selected === u.id && 'font-medium text-brand-700 dark:text-brand-300',
+                )}
+              >
+                <Avatar name={u.name} size={20} />
+                <span className="min-w-0 flex-1 truncate">{u.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/** Who is filing the work. New rows are theirs, and approval checks against it. */
+function IAmBlock({
+  users,
+  selected,
+  loading,
+  onSelect,
+  onAdd,
+}: {
+  users: User[];
+  selected: string;
+  loading: boolean;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+}) {
+  const me = users.find((u) => u.id === selected) ?? null;
+  return (
+    <Card className="p-3">
+      <p className="px-1 text-xs font-medium uppercase tracking-wide text-slate-400">I am</p>
+      {loading ? (
+        <span className="mt-2 block h-9 w-40 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+      ) : users.length === 0 ? (
+        <p className="mt-2 px-1 text-sm text-slate-400">
+          Nobody on the team yet. Add people in Settings.
+        </p>
+      ) : (
+        <>
+          <div className="mt-1.5 flex items-center gap-2 px-1">
+            {me && <Avatar name={me.name} size={28} />}
+            <Select
+              value={selected}
+              onChange={(e) => onSelect(e.target.value)}
+              aria-label="Who is adding this work"
+            >
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Button size="sm" className="mt-2 w-full" onClick={onAdd}>
+            <Plus className="h-4 w-4" /> New task
+          </Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function TodayBlock({
+  data,
+  loading,
+  onPick,
+}: {
+  data?: { date: string; dueToday: number; overdue: number };
+  loading: boolean;
+  onPick: (tab: TabKey) => void;
+}) {
+  return (
+    <Card className="p-3">
+      <p className="px-1 text-xs font-medium uppercase tracking-wide text-slate-400">Today</p>
+      {loading || !data ? (
+        <div className="mt-2 space-y-2 px-1">
+          <div className="h-5 w-28 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          <div className="h-4 w-32 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+        </div>
+      ) : (
+        <>
+          <p className="mt-1 px-1 font-semibold text-slate-900 dark:text-slate-100">
+            {formatJiraDate(data.date)}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 px-1 text-sm">
+            <span className="tabular-nums text-slate-500">
+              <span className="font-semibold text-slate-800 dark:text-slate-100">
+                {data.dueToday}
+              </span>{' '}
+              due
+            </span>
+            <button
+              onClick={() => onPick('overdue')}
+              className={cn(
+                'tabular-nums hover:underline',
+                data.overdue > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400',
+              )}
+            >
+              <span className="font-semibold">{data.overdue}</span> overdue
+            </button>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** Deadline within three days and still live. */
+function AtRiskBlock({ tasks, loading }: { tasks: AtRiskTask[]; loading: boolean }) {
+  const shown = tasks.slice(0, 4);
+  const extra = tasks.length - shown.length;
+  return (
+    <Card className="p-3">
+      <div className="flex items-center justify-between px-1">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">At risk</p>
+        <span className="text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-200">
+          {loading ? '' : tasks.length}
+        </span>
+      </div>
+      {loading ? (
+        <div className="mt-2 space-y-2 px-1">
+          {[0, 1].map((i) => (
+            <div key={i} className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          ))}
+        </div>
+      ) : shown.length === 0 ? (
+        // A statement rather than an empty box, so the row does not change
+        // height when nothing happens to be at risk.
+        <p className="mt-2 px-1 text-sm text-slate-400">Nothing at risk</p>
+      ) : (
+        <ul className="mt-1 divide-y divide-slate-100 dark:divide-slate-800">
+          {shown.map((t) => (
+            <li key={t.id} className="flex items-center gap-2 px-1 py-1">
+              <span
+                className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-200"
+                title={`${t.title} · ${t.userName}`}
+              >
+                {t.title}
+              </span>
+              <span className="shrink-0 text-xs tabular-nums text-amber-600 dark:text-amber-400">
+                {formatJiraDate(t.deadlineDate)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {extra > 0 && (
+        <p className="mt-1 px-1 text-xs text-slate-400">+{extra} more</p>
+      )}
+    </Card>
   );
 }
 
@@ -681,148 +878,64 @@ function TaskRow({
   users,
   actor,
   visible,
-  offsets,
   savingCells,
   cellErrors,
   onSave,
   onActivity,
-  onCollab,
+  onApprove,
   onDelete,
 }: {
   task: Task;
   users: User[];
   actor?: string;
   visible: (k: ColumnKey) => boolean;
-  offsets: Partial<Record<ColumnKey, number>>;
   savingCells: Record<string, boolean>;
   cellErrors: Record<string, string>;
   onSave: (id: string, field: string, value: unknown) => void;
   onActivity: () => void;
-  onCollab: () => void;
+  onApprove: () => void;
   onDelete: () => void;
 }) {
   const [menu, setMenu] = useState(false);
+  useEscape(menu, () => setMenu(false));
   const k = (field: string) => `${task.id}:${field}`;
   const cell = (field: string) => ({
     saving: savingCells[k(field)],
     error: cellErrors[k(field)] ?? null,
   });
 
-  // Only the named approver may approve. The option renders but is disabled,
-  // with a tooltip naming who can — the server enforces the same rule.
-  const canApprove = Boolean(actor && task.approverId && actor === task.approverId);
-  const approverName = task.approverName ?? 'nobody yet';
-
-  // Sticky cells need their own background or the scrolling columns show
-  // through; hover has to repaint them too.
-  const stickyCell = (key: ColumnKey) =>
-    ({
-      left: offsets[key],
-      background: 'inherit',
-    }) as const;
+  // Approval is enabled only on completed work, and only for its own approver.
+  const isApprover = Boolean(actor && task.approverId && actor === task.approverId);
+  const canApprove = isApprover && task.status === 'completed' && !task.approvedAt;
+  const approveReason = task.approvedAt
+    ? 'Already approved'
+    : task.status !== 'completed'
+      ? 'Only completed work can be approved'
+      : !task.approverId
+        ? 'No approver set for this task'
+        : `Only ${task.approverName} can approve this`;
 
   return (
-    // Rows are uniform. The spec is explicit that collaborator rows are not
-    // tinted — the stacked avatars in the With column are the signal.
     <tr className="group" style={{ background: 'var(--n0)' }}>
-      {visible('type') && (
-        <td className="sticky z-10" style={stickyCell('type')}>
-          <IconSelect<TaskType>
-            value={task.type}
-            options={TASK_TYPES}
-            labels={TASK_TYPE_LABELS}
-            onSave={(v) => onSave(task.id, 'type', v)}
-            render={(v) => <TypeSquare type={v} />}
-            width={18}
-            ariaLabel={`Type of ${task.ref}`}
-            {...cell('type')}
+      {visible('name') && (
+        <td className="sticky z-10" style={{ left: 0, background: 'inherit' }}>
+          <UserCell
+            value={task.userId}
+            users={users}
+            allowEmpty={false}
+            ariaLabel={`Person doing ${task.title}`}
+            onSave={(v) => v && onSave(task.id, 'userId', v)}
+            {...cell('userId')}
           />
-        </td>
-      )}
-
-      {visible('ref') && (
-        <td className="sticky z-10" style={stickyCell('ref')}>
-          <button
-            onClick={onActivity}
-            style={{ color: 'var(--b400)' }}
-            className="whitespace-nowrap px-1 text-sm tabular-nums hover:underline"
-          >
-            {task.ref}
-          </button>
         </td>
       )}
 
       {visible('title') && (
-        <td className="sticky z-10" style={stickyCell('title')}>
+        <td>
           <EditableText
             value={task.title}
             onSave={(v) => onSave(task.id, 'title', v)}
             {...cell('title')}
-          />
-        </td>
-      )}
-
-      {visible('assignee') && (
-        <td className="sticky z-10" style={stickyCell('assignee')}>
-          <UserCell
-            value={task.assigneeId}
-            users={users}
-            allowEmpty={false}
-            ariaLabel={`Assignee of ${task.ref}`}
-            onSave={(v) => v && onSave(task.id, 'assigneeId', v)}
-            {...cell('assigneeId')}
-          />
-        </td>
-      )}
-
-      {visible('with') && (
-        <td>
-          <button
-            onClick={onCollab}
-            data-cell
-            title="Add or remove people"
-            aria-label={
-              task.collaborators.length === 0
-                ? `Add people to ${task.ref}`
-                : `${task.collaborators.length} people on ${task.ref}`
-            }
-            className="rounded-[3px] px-0.5 py-0.5"
-          >
-            {task.collaborators.length === 0 ? (
-              <span style={{ color: 'var(--n200)' }} className="text-xs">
-                Add
-              </span>
-            ) : (
-              <AvatarStack
-                people={task.collaborators.map((c) => ({
-                  name: c.userName,
-                  // A dot marks someone carrying their own due date; the date
-                  // itself lives in the With popover, not a date column.
-                  dot: Boolean(c.memberDueDate),
-                }))}
-              />
-            )}
-          </button>
-        </td>
-      )}
-
-      {visible('status') && (
-        <td>
-          <IconSelect<TaskStatus>
-            value={task.status}
-            options={TASK_STATUSES}
-            labels={TASK_STATUS_LABELS}
-            onSave={(v) => onSave(task.id, 'status', v)}
-            render={(v) => <Lozenge status={v} />}
-            width={102}
-            ariaLabel={`Status of ${task.ref}`}
-            optionDisabled={(v) => v === 'approved' && !canApprove}
-            optionTitle={(v) =>
-              v === 'approved' && !canApprove
-                ? `Only ${approverName} can approve this task`
-                : undefined
-            }
-            {...cell('status')}
           />
         </td>
       )}
@@ -834,34 +947,53 @@ function TaskRow({
             options={TASK_PRIORITIES}
             labels={TASK_PRIORITY_LABELS}
             onSave={(v) => onSave(task.id, 'priority', v)}
-            render={(v) => <PriorityIcon priority={v} />}
-            width={20}
-            ariaLabel={`Priority of ${task.ref}`}
+            render={(v) => <PriorityMark priority={v} />}
+            width={94}
+            ariaLabel={`Priority of ${task.title}`}
             {...cell('priority')}
           />
         </td>
       )}
 
-      {visible('allocatedAt') && (
+      {visible('status') && (
         <td>
-          <EditableDate
-            value={task.allocatedAt.slice(0, 10)}
-            ariaLabel={`Allocated date of ${task.ref}`}
-            onSave={(v) => v && onSave(task.id, 'allocatedAt', v)}
-            {...cell('allocatedAt')}
+          <IconSelect<TaskStatus>
+            value={task.status}
+            options={TASK_STATUSES}
+            labels={TASK_STATUS_LABELS}
+            onSave={(v) => onSave(task.id, 'status', v)}
+            render={(v) => (
+              <span title={task.completedAt ? `Completed ${formatJiraDate(task.completedAt)}` : undefined}>
+                <Lozenge status={v} />
+              </span>
+            )}
+            width={104}
+            ariaLabel={`Status of ${task.title}`}
+            {...cell('status')}
           />
         </td>
       )}
 
-      {visible('dueDate') && (
+      {visible('allocation') && (
+        <td>
+          <EditableDate
+            value={task.allocationDate}
+            ariaLabel={`Allocation date of ${task.title}`}
+            onSave={(v) => onSave(task.id, 'allocationDate', v)}
+            {...cell('allocationDate')}
+          />
+        </td>
+      )}
+
+      {visible('due') && (
         <td>
           <EditableDate
             value={task.dueDate}
-            // Red here only when there is no deadline, because then the due
-            // date is the hard limit. Otherwise a slipped target is amber.
-            overdue={task.isOverdue && !task.deadline}
+            // Red only when there is no deadline behind it, because then the
+            // due date is the hard limit. A slipped target is amber.
+            overdue={task.isOverdue && !task.deadlineDate}
             slipped={task.hasSlipped}
-            ariaLabel={`Due date of ${task.ref}`}
+            ariaLabel={`Due date of ${task.title}`}
             onSave={(v) => onSave(task.id, 'dueDate', v)}
             {...cell('dueDate')}
           />
@@ -871,19 +1003,14 @@ function TaskRow({
       {visible('deadline') && (
         <td>
           <EditableDate
-            value={task.deadline}
+            value={task.deadlineDate}
             min={task.dueDate ?? undefined}
-            overdue={task.isOverdue && Boolean(task.deadline)}
-            ariaLabel={`Deadline of ${task.ref}`}
-            onSave={(v) => onSave(task.id, 'deadline', v)}
-            {...cell('deadline')}
+            overdue={task.pastDeadline}
+            bold={task.pastDeadline}
+            ariaLabel={`Deadline of ${task.title}`}
+            onSave={(v) => onSave(task.id, 'deadlineDate', v)}
+            {...cell('deadlineDate')}
           />
-        </td>
-      )}
-
-      {visible('completedAt') && (
-        <td>
-          <ReadOnlyDate value={task.completedAt} />
         </td>
       )}
 
@@ -892,28 +1019,22 @@ function TaskRow({
           <UserCell
             value={task.reportTo}
             users={users}
-            ariaLabel={`Reports to, for ${task.ref}`}
+            ariaLabel={`Reports to, for ${task.title}`}
             onSave={(v) => onSave(task.id, 'reportTo', v)}
             {...cell('reportTo')}
           />
         </td>
       )}
 
-      {visible('approverId') && (
+      {visible('approver') && (
         <td>
           <UserCell
             value={task.approverId}
             users={users}
-            ariaLabel={`Approver of ${task.ref}`}
+            ariaLabel={`Approver of ${task.title}`}
             onSave={(v) => onSave(task.id, 'approverId', v)}
             {...cell('approverId')}
           />
-        </td>
-      )}
-
-      {visible('approvedAt') && (
-        <td>
-          <ReadOnlyDate value={task.approvedAt} />
         </td>
       )}
 
@@ -921,7 +1042,7 @@ function TaskRow({
         <div className="row-menu">
           <button
             onClick={() => setMenu((v) => !v)}
-            aria-label={`Actions for ${task.ref}`}
+            aria-label={`Actions for ${task.title}`}
             style={{ color: 'var(--n200)' }}
             className="rounded-[3px] p-1"
           >
@@ -933,8 +1054,21 @@ function TaskRow({
             <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
             <div
               style={{ background: 'var(--n0)', borderColor: 'var(--n40)' }}
-              className="absolute right-2 z-50 mt-1 w-40 overflow-hidden rounded-[3px] border py-1 text-left shadow-lg"
+              className="absolute right-2 z-50 mt-1 w-52 overflow-hidden rounded-[3px] border py-1 text-left shadow-lg"
             >
+              <button
+                disabled={!canApprove}
+                title={canApprove ? undefined : approveReason}
+                onClick={() => {
+                  setMenu(false);
+                  onApprove();
+                }}
+                style={{ color: canApprove ? 'var(--g400)' : 'var(--n200)' }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[color:var(--n20)] disabled:cursor-not-allowed"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {task.approvedAt ? 'Approved' : 'Approve'}
+              </button>
               <button
                 onClick={() => {
                   setMenu(false);
@@ -967,61 +1101,53 @@ function TaskRow({
 function NewTaskRow({
   users,
   visible,
-  defaultAssignee,
-  actor,
+  defaultUser,
   pending,
   onCancel,
   onCreate,
 }: {
   users: User[];
   visible: (k: ColumnKey) => boolean;
-  defaultAssignee?: string;
-  actor?: string;
+  defaultUser?: string;
   pending: boolean;
   onCancel: () => void;
   onCreate: (input: {
+    userId: string;
     title: string;
-    assigneeId: string;
-    type: TaskType;
-    status: TaskStatus;
     priority: TaskPriority;
-    allocatedBy?: string | null;
+    status: TaskStatus;
     dueDate?: string | null;
-    deadline?: string | null;
+    deadlineDate?: string | null;
   }) => Promise<void>;
 }) {
+  const [userId, setUserId] = useState(defaultUser ?? users[0]?.id ?? '');
   const [title, setTitle] = useState('');
-  const [assigneeId, setAssigneeId] = useState(defaultAssignee ?? users[0]?.id ?? '');
-  const [type, setType] = useState<TaskType>('task');
-  const [status, setStatus] = useState<TaskStatus>('not_started');
   const [priority, setPriority] = useState<TaskPriority>('medium');
+  const [statusValue, setStatusValue] = useState<TaskStatus>('upcoming');
   const [dueDate, setDueDate] = useState('');
-  const [deadline, setDeadline] = useState('');
+  const [deadlineDate, setDeadlineDate] = useState('');
   const [error, setError] = useState<string | null>(null);
   const firstRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => firstRef.current?.focus(), []);
 
   const commit = async () => {
-    if (!title.trim() || !assigneeId) {
-      setError('A title and an assignee are required');
+    if (!title.trim() || !userId) {
+      setError('A name and a title are required');
       return;
     }
-    if (dueDate && deadline && deadline < dueDate) {
-      setError('Deadline cannot be earlier than the due date');
+    if (dueDate && deadlineDate && deadlineDate < dueDate) {
+      setError('The deadline cannot be earlier than the due date');
       return;
     }
     setError(null);
     await onCreate({
+      userId,
       title: title.trim(),
-      assigneeId,
-      type,
-      status,
       priority,
-      // The person in Viewing allocated it, since there is no session.
-      allocatedBy: actor ?? null,
+      status: statusValue,
       dueDate: dueDate || null,
-      deadline: deadline || null,
+      deadlineDate: deadlineDate || null,
     });
   };
 
@@ -1040,10 +1166,10 @@ function NewTaskRow({
 
   return (
     <>
-      <tr className="border-l-4 border-l-brand-500 bg-brand-50/40 dark:bg-brand-950/20" onKeyDown={onKey}>
-        {visible('assignee') && (
-          <td className="sticky left-0 z-10 bg-brand-50/40 px-2 py-1.5 dark:bg-brand-950/20">
-            <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} aria-label="Assignee">
+      <tr onKeyDown={onKey} style={{ background: 'var(--b50)' }}>
+        {visible('name') && (
+          <td className="sticky z-10" style={{ left: 0, background: 'inherit' }}>
+            <Select value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Name">
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
@@ -1052,9 +1178,8 @@ function NewTaskRow({
             </Select>
           </td>
         )}
-        {visible('with') && <td className="px-3 py-1.5 text-xs text-slate-400">—</td>}
         {visible('title') && (
-          <td className="px-2 py-1.5">
+          <td>
             <Input
               ref={firstRef}
               value={title}
@@ -1064,20 +1189,13 @@ function NewTaskRow({
             />
           </td>
         )}
-        {visible('status') && (
-          <td className="px-2 py-1.5">
-            <Select value={status} onChange={(e) => setStatus(e.target.value as TaskStatus)} aria-label="Status">
-              {TASK_STATUSES.filter((s) => s !== 'approved').map((s) => (
-                <option key={s} value={s}>
-                  {TASK_STATUS_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          </td>
-        )}
         {visible('priority') && (
-          <td className="px-2 py-1.5">
-            <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)} aria-label="Priority">
+          <td>
+            <Select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as TaskPriority)}
+              aria-label="Priority"
+            >
               {TASK_PRIORITIES.map((p) => (
                 <option key={p} value={p}>
                   {TASK_PRIORITY_LABELS[p]}
@@ -1086,37 +1204,45 @@ function NewTaskRow({
             </Select>
           </td>
         )}
-        {visible('allocatedAt') && (
-          <td className="px-2 py-1.5 text-xs text-slate-400">{formatDate(istToday())}</td>
+        {visible('status') && (
+          <td>
+            <Select
+              value={statusValue}
+              onChange={(e) => setStatusValue(e.target.value as TaskStatus)}
+              aria-label="Status"
+            >
+              {TASK_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {TASK_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </Select>
+          </td>
         )}
-        {visible('dueDate') && (
-          <td className="px-2 py-1.5">
+        {visible('allocation') && (
+          <td className="px-2 text-xs text-slate-400">{formatJiraDate(istToday())}</td>
+        )}
+        {visible('due') && (
+          <td>
             <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} aria-label="Due date" />
           </td>
         )}
         {visible('deadline') && (
-          <td className="px-2 py-1.5">
+          <td>
             <Input
               type="date"
-              value={deadline}
+              value={deadlineDate}
               min={dueDate || undefined}
-              onChange={(e) => setDeadline(e.target.value)}
+              onChange={(e) => setDeadlineDate(e.target.value)}
               aria-label="Deadline"
             />
           </td>
         )}
-        {visible('completedAt') && <td className="px-2 py-1.5 text-xs text-slate-400">—</td>}
-        {visible('reportTo') && <td className="px-2 py-1.5 text-xs text-slate-400">—</td>}
-        {visible('approverId') && <td className="px-2 py-1.5 text-xs text-slate-400">—</td>}
-        {visible('approvedAt') && <td className="px-2 py-1.5 text-xs text-slate-400">—</td>}
-        <td className="px-2 py-1.5 text-right">
+        {visible('reportTo') && <td className="px-2 text-xs text-slate-400">From the roster</td>}
+        {visible('approver') && <td className="px-2 text-xs text-slate-400">—</td>}
+        <td className="text-right">
           <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              onClick={() => void commit()}
-              disabled={pending}
-              aria-label="Add task"
-            >
+            <Button size="sm" onClick={() => void commit()} disabled={pending} aria-label="Add task">
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
             </Button>
             <button
@@ -1131,7 +1257,7 @@ function NewTaskRow({
       </tr>
       {error && (
         <tr>
-          <td colSpan={span} className="bg-brand-50/40 px-3 pb-2 text-xs text-rose-600 dark:bg-brand-950/20 dark:text-rose-400">
+          <td colSpan={span} style={{ background: 'var(--b50)', color: 'var(--r400)' }} className="px-3 pb-2 text-xs">
             {error}
           </td>
         </tr>
@@ -1140,33 +1266,22 @@ function NewTaskRow({
   );
 }
 
-/** Below 768px a 13-column table is unusable, so each row becomes a card. */
+/** Below 768px the table becomes cards; editing opens a bottom sheet. */
 function MobileCard({
   task,
-  users,
   onSave,
 }: {
   task: Task;
-  users: User[];
   onSave: (id: string, field: string, value: unknown) => void;
 }) {
-  const [sheet, setSheet] = useState<null | 'status' | 'priority' | 'dueDate'>(null);
+  const [sheet, setSheet] = useState<null | 'status' | 'priority'>(null);
   return (
-    // Cards, not dense rows, so the "no left colour bar" rule for the Jira
-    // table does not apply here. Overdue still needs to be visible at a glance.
-    <li
-      className={cn(
-        'border-l-4 px-4 py-3',
-        task.isOverdue ? 'border-l-rose-500' : 'border-l-transparent',
-      )}
-    >
+    <li className={cn('border-l-4 px-4 py-3', task.isOverdue ? 'border-l-rose-500' : 'border-l-transparent')}>
       <div className="flex items-start gap-2">
-        <Avatar name={task.assigneeName} size={24} />
+        <Avatar name={task.userName} size={24} />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-slate-800 dark:text-slate-100">{task.title}</p>
-          <p className="text-[11px] tabular-nums text-slate-400">
-            {task.ref} · {task.assigneeName}
-          </p>
+          <p className="text-[11px] text-slate-400">{task.userName}</p>
         </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1179,28 +1294,31 @@ function MobileCard({
         </button>
         <button
           onClick={() => setSheet('priority')}
-          className="flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300"
+          className="jira-table flex min-h-[44px] items-center rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700"
         >
-          <span className="jira-table inline-flex">
-            <PriorityIcon priority={task.priority} />
-          </span>
-          {TASK_PRIORITY_LABELS[task.priority]}
+          <PriorityMark priority={task.priority} />
         </button>
       </div>
       <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+        <div>
+          <dt className="text-slate-400">Allocated</dt>
+          <dd className="tabular-nums text-slate-600 dark:text-slate-300">
+            {task.allocationDate ? formatJiraDate(task.allocationDate) : '—'}
+          </dd>
+        </div>
         <div>
           <dt className="text-slate-400">Due</dt>
           <dd
             className={cn(
               'tabular-nums',
-              task.isOverdue && !task.deadline
+              task.isOverdue && !task.deadlineDate
                 ? 'text-rose-600'
                 : task.hasSlipped
                   ? 'text-amber-600'
                   : 'text-slate-600 dark:text-slate-300',
             )}
           >
-            {task.dueDate ? formatDate(task.dueDate) : '—'}
+            {task.dueDate ? formatJiraDate(task.dueDate) : '—'}
           </dd>
         </div>
         <div>
@@ -1208,27 +1326,10 @@ function MobileCard({
           <dd
             className={cn(
               'tabular-nums',
-              task.isOverdue && task.deadline
-                ? 'text-rose-600'
-                : 'text-slate-600 dark:text-slate-300',
+              task.pastDeadline ? 'font-semibold text-rose-600' : 'text-slate-600 dark:text-slate-300',
             )}
           >
-            {task.deadline ? formatDate(task.deadline) : '—'}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-slate-400">With</dt>
-          <dd>
-            {task.collaborators.length ? (
-              <AvatarStack
-                people={task.collaborators.map((c) => ({
-                  name: c.userName,
-                  dot: Boolean(c.memberDueDate),
-                }))}
-              />
-            ) : (
-              <span className="text-slate-400">—</span>
-            )}
+            {task.deadlineDate ? formatJiraDate(task.deadlineDate) : '—'}
           </dd>
         </div>
       </dl>
@@ -1238,7 +1339,7 @@ function MobileCard({
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setSheet(null)} />
           <div className="relative w-full rounded-t-xl bg-white p-4 dark:bg-slate-900">
             <p className="mb-3 text-sm font-medium text-slate-700 dark:text-slate-200">
-              {sheet === 'status' ? 'Status' : sheet === 'priority' ? 'Priority' : 'Due date'}
+              {sheet === 'status' ? 'Status' : 'Priority'}
             </p>
             {sheet === 'status' &&
               TASK_STATUSES.map((s) => (
@@ -1261,9 +1362,9 @@ function MobileCard({
                     onSave(task.id, 'priority', p);
                     setSheet(null);
                   }}
-                  className="flex min-h-[44px] w-full items-center rounded-lg px-3 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                  className="jira-table flex min-h-[44px] w-full items-center rounded-lg px-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
-                  {TASK_PRIORITY_LABELS[p]}
+                  <PriorityMark priority={p} />
                 </button>
               ))}
             <Button variant="secondary" size="sm" className="mt-3 w-full" onClick={() => setSheet(null)}>
@@ -1272,179 +1373,87 @@ function MobileCard({
           </div>
         </div>
       )}
-      {users.length === 0 && null}
     </li>
   );
 }
 
-// ---- Panels ----------------------------------------------------------------
+// ---- Header controls -------------------------------------------------------
 
-function CollaboratorPanel({
-  task,
-  users,
-  actor,
-  onClose,
-  onChanged,
+/** A column header that also filters that column. */
+function HeaderFilter<T extends string>({
+  label,
+  value,
+  options,
+  labels,
+  onChange,
 }: {
-  task: Task | null;
-  users: User[];
-  actor?: string;
-  onClose: () => void;
-  onChanged: () => void;
+  label: string;
+  value: string;
+  options: readonly T[];
+  labels: Record<T, string>;
+  onChange: (next: string) => void;
 }) {
-  const { toast } = useToast();
-  const [adding, setAdding] = useState('');
-  const [busy, setBusy] = useState(false);
-  if (!task) return null;
-
-  const available = users.filter(
-    (u) => u.id !== task.assigneeId && !task.collaborators.some((c) => c.userId === u.id),
-  );
-
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    try {
-      await fn();
-      onChanged();
-    } catch (err) {
-      toast((err as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const active = Boolean(value);
   return (
-    <SlideOver
-      open
-      onClose={onClose}
-      title="People on this task"
-      description={`${task.ref} · ${task.title}`}
+    <span className="relative inline-flex items-center gap-1">
+      <span className={cn('pointer-events-none', active && 'text-[color:var(--b400)]')}>
+        {label}
+      </span>
+      <ChevronDown
+        className={cn('pointer-events-none h-3 w-3', active ? 'text-[color:var(--b400)]' : 'opacity-50')}
+      />
+      {active && (
+        <span
+          aria-hidden
+          style={{ background: 'var(--b400)' }}
+          className="pointer-events-none absolute -right-1 -top-0.5 h-1.5 w-1.5 rounded-full"
+        />
+      )}
+      <select
+        value={value}
+        aria-label={`Filter by ${label.toLowerCase()}`}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 cursor-pointer opacity-0"
+      >
+        <option value="">Any {label.toLowerCase()}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {labels[o]}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+/** A sortable column header. Chevron on hover, filled when active. */
+function HeaderSort({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir: 'asc' | 'desc';
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="group/sort inline-flex items-center gap-1"
+      aria-label={`Sort by ${label.toLowerCase()}`}
     >
-      <div className="space-y-4">
-        <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Owner</p>
-          <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800">
-            <Avatar name={task.assigneeName} size={24} />
-            <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-              {task.assigneeName}
-            </span>
-            <span className="ml-auto text-xs text-slate-400">Lead</span>
-          </div>
-        </div>
-
-        <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">
-            Also working on it
-          </p>
-          {task.collaborators.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-400 dark:border-slate-700">
-              Nobody else yet.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {task.collaborators.map((c) => (
-                <li
-                  key={c.userId}
-                  className="rounded-lg border border-slate-200 p-3 dark:border-slate-800"
-                >
-                  <div className="flex items-center gap-2">
-                    <Avatar name={c.userName} size={24} />
-                    <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                      {c.userName}
-                    </span>
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        run(() => trackerApi.removeCollaborator(task.id, c.userId, actor))
-                      }
-                      aria-label={`Remove ${c.userName}`}
-                      className="ml-auto rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-slate-400">Role</span>
-                      <Select
-                        value={c.role}
-                        disabled={busy}
-                        onChange={(e) =>
-                          run(() =>
-                            trackerApi.updateCollaborator(
-                              task.id,
-                              c.userId,
-                              { role: e.target.value as CollaboratorRole },
-                              actor,
-                            ),
-                          )
-                        }
-                      >
-                        {COLLABORATOR_ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {COLLABORATOR_ROLE_LABELS[r]}
-                          </option>
-                        ))}
-                      </Select>
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs text-slate-400">Their due date</span>
-                      <Input
-                        type="date"
-                        defaultValue={c.memberDueDate ?? ''}
-                        disabled={busy}
-                        onChange={(e) =>
-                          run(() =>
-                            trackerApi.updateCollaborator(
-                              task.id,
-                              c.userId,
-                              { memberDueDate: e.target.value || null },
-                              actor,
-                            ),
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {available.length > 0 && (
-          <div className="flex items-end gap-2">
-            <label className="min-w-0 flex-1">
-              <span className="mb-1 block text-xs text-slate-400">Add someone</span>
-              <Select value={adding} onChange={(e) => setAdding(e.target.value)}>
-                <option value="">Choose a person</option>
-                {available.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
-            </label>
-            <Button
-              size="sm"
-              disabled={!adding || busy}
-              onClick={() =>
-                run(async () => {
-                  await trackerApi.addCollaborator(
-                    task.id,
-                    { userId: adding, role: 'contributor', memberDueDate: null },
-                    actor,
-                  );
-                  setAdding('');
-                })
-              }
-            >
-              <Plus className="h-4 w-4" /> Add
-            </Button>
-          </div>
+      <span className={cn(active && 'text-[color:var(--b400)]')}>{label}</span>
+      <ChevronDown
+        className={cn(
+          'h-3 w-3 transition',
+          active
+            ? cn('text-[color:var(--b400)]', dir === 'desc' && 'rotate-180')
+            : 'opacity-0 group-hover/sort:opacity-50',
         )}
-      </div>
-    </SlideOver>
+      />
+    </button>
   );
 }
 
@@ -1455,11 +1464,10 @@ function ActivityPanel({ task, onClose }: { task: Task | null; onClose: () => vo
     enabled: Boolean(task),
   });
   if (!task) return null;
-
   const rows = query.data?.activity ?? [];
 
   return (
-    <SlideOver open onClose={onClose} title="Activity" description={`${task.ref} · ${task.title}`}>
+    <SlideOver open onClose={onClose} title="Activity" description={task.title}>
       {query.isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => (
@@ -1510,267 +1518,13 @@ function TableSkeleton() {
   return (
     <div className="divide-y divide-slate-100 dark:divide-slate-800">
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="flex items-center gap-4 px-4 py-3">
-          <div className="h-7 w-7 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800" />
+        <div key={i} className="flex items-center gap-4 px-4" style={{ height: 44 }}>
+          <div className="h-6 w-6 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800" />
           <div className="h-4 flex-1 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          <div className="h-4 w-24 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
           <div className="h-4 w-20 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
           <div className="h-4 w-20 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
         </div>
       ))}
     </div>
-  );
-}
-
-// ---- The two header blocks -------------------------------------------------
-
-/**
- * Whose work is on screen.
- *
- * Collapsed it shows the team and their avatars; opening it lists everyone, so
- * picking a person is one click rather than hunting through a dropdown of
- * names. "Everyone" is the way back to the whole team.
- */
-function GroupBlock({
-  users,
-  selected,
-  loading,
-  counts,
-  onSelect,
-}: {
-  users: User[];
-  selected: string;
-  loading: boolean;
-  counts?: { all: number; overdue: number };
-  onSelect: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const person = users.find((u) => u.id === selected) ?? null;
-
-  return (
-    <Card className="p-3">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-slate-800"
-      >
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-            Group
-          </p>
-          {loading ? (
-            <span className="mt-1 block h-5 w-32 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          ) : person ? (
-            <>
-              <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
-                {person.name}
-              </p>
-              <p className="truncate text-xs text-slate-400">
-                {person.designation ?? 'No designation set'}
-                {counts ? ` · ${counts.all} open` : ''}
-                {counts && counts.overdue > 0 ? `, ${counts.overdue} overdue` : ''}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="font-semibold text-slate-900 dark:text-slate-100">
-                Everyone
-              </p>
-              <p className="truncate text-xs text-slate-400">
-                {users.length} {users.length === 1 ? 'person' : 'people'}
-                {counts ? ` · ${counts.all} open` : ''}
-                {counts && counts.overdue > 0 ? `, ${counts.overdue} overdue` : ''}
-              </p>
-            </>
-          )}
-        </div>
-        {!person && users.length > 0 && (
-          <AvatarStack people={users.map((u) => ({ name: u.name }))} max={4} />
-        )}
-        {person && <Avatar name={person.name} size={36} />}
-        <ChevronDown
-          className={cn(
-            'h-4 w-4 shrink-0 text-slate-400 transition-transform',
-            open && 'rotate-180',
-          )}
-        />
-      </button>
-
-      {open && (
-        <ul className="mt-2 max-h-56 overflow-y-auto border-t border-slate-100 pt-2 dark:border-slate-800">
-          <li>
-            <button
-              onClick={() => {
-                onSelect('');
-                setOpen(false);
-              }}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
-                !selected && 'font-medium text-brand-700 dark:text-brand-300',
-              )}
-            >
-              <Users2 className="h-4 w-4 text-slate-400" />
-              Everyone
-            </button>
-          </li>
-          {users.map((u) => (
-            <li key={u.id}>
-              <button
-                onClick={() => {
-                  onSelect(u.id);
-                  setOpen(false);
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
-                  selected === u.id && 'font-medium text-brand-700 dark:text-brand-300',
-                )}
-              >
-                <Avatar name={u.name} size={20} />
-                <span className="min-w-0 flex-1 truncate">{u.name}</span>
-                {u.designation && (
-                  <span className="shrink-0 truncate text-xs text-slate-400">
-                    {u.designation}
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
-
-/**
- * Who is filing the work.
- *
- * Deliberately separate from the Group block: you can look at a colleague's
- * list while adding your own task. New rows are filed under this person, and
- * the approve permission is checked against them.
- */
-function IAmBlock({
-  users,
-  selected,
-  loading,
-  onSelect,
-  onAdd,
-}: {
-  users: User[];
-  selected: string;
-  loading: boolean;
-  onSelect: (id: string) => void;
-  onAdd: () => void;
-}) {
-  const me = users.find((u) => u.id === selected) ?? null;
-  return (
-    <Card className="p-3">
-      <div className="flex items-center gap-3 px-1">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-            I am
-          </p>
-          {loading ? (
-            <span className="mt-1 block h-9 w-40 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          ) : users.length === 0 ? (
-            <p className="mt-1 text-sm text-slate-400">
-              Nobody on the team yet. Add people in Settings.
-            </p>
-          ) : (
-            <div className="mt-1 flex items-center gap-2">
-              {me && <Avatar name={me.name} size={28} />}
-              <Select
-                value={selected}
-                onChange={(e) => onSelect(e.target.value)}
-                aria-label="Who is adding this work"
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
-        </div>
-        <Button size="sm" onClick={onAdd} disabled={users.length === 0}>
-          <Plus className="h-4 w-4" /> New task
-        </Button>
-      </div>
-      <p className="mt-2 px-1 text-xs text-slate-400">
-        New work is filed under this name, and only they can approve what they are
-        the approver for.
-      </p>
-    </Card>
-  );
-}
-
-/**
- * A column header that also filters that column.
- *
- * Rendered as a native select behind the header text so it keeps native
- * keyboard and touch behaviour; an active filter is marked with a dot rather
- * than a badge, which would not fit a 36px column.
- */
-function HeaderFilter<T extends string>({
-  label,
-  hideLabel,
-  value,
-  options,
-  labels,
-  onChange,
-}: {
-  label: string;
-  hideLabel?: boolean;
-  value: string;
-  options: readonly T[];
-  labels: Record<T, string>;
-  onChange: (next: string) => void;
-}) {
-  const active = Boolean(value);
-  return (
-    <span className="relative inline-flex items-center gap-1">
-      <span
-        className={cn(
-          'pointer-events-none',
-          hideLabel && 'sr-only',
-          active && 'text-[color:var(--b400)]',
-        )}
-      >
-        {label}
-      </span>
-      {!hideLabel && (
-        <ChevronDown
-          className={cn(
-            'pointer-events-none h-3 w-3',
-            active ? 'text-[color:var(--b400)]' : 'opacity-50',
-          )}
-        />
-      )}
-      {hideLabel && (
-        <ChevronDown
-          className={cn('pointer-events-none h-3 w-3', active ? 'text-[color:var(--b400)]' : 'opacity-50')}
-        />
-      )}
-      {active && (
-        <span
-          aria-hidden
-          style={{ background: 'var(--b400)' }}
-          className="pointer-events-none absolute -right-1 -top-0.5 h-1.5 w-1.5 rounded-full"
-        />
-      )}
-      <select
-        value={value}
-        aria-label={`Filter by ${label.toLowerCase()}`}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 cursor-pointer opacity-0"
-      >
-        <option value="">Any {label.toLowerCase()}</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {labels[o]}
-          </option>
-        ))}
-      </select>
-    </span>
   );
 }

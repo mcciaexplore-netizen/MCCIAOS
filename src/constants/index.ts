@@ -1,12 +1,10 @@
 import type {
   AppSettings,
-  CollaboratorRole,
   EventMode,
   EventStatus,
   EventType,
   TaskPriority,
   TaskStatus,
-  TaskType,
   TonedOption,
 } from '../types/index.js';
 
@@ -101,79 +99,45 @@ export const EVENT_TOPIC_SUGGESTIONS = [
 ];
 
 // ---- Work Tracker ---------------------------------------------------------
-// CHECK constraints in Postgres (db/work-tracker.sql), stored lower_snake.
-//
-// Colours map onto the app's existing Badge tones rather than introducing a
-// second palette — see the note in src/pages/WorkTracker.tsx.
+// CHECK constraints in Postgres (db/work-tracker.sql), stored lower case.
+// Colours are Atlassian's, resolved through the .jira-table token block in
+// src/index.css so light and dark share one definition.
 export const TASK_STATUSES = [
-  'not_started',
-  'in_progress',
-  'blocked',
-  'submitted',
-  'approved',
+  'upcoming',
+  'ongoing',
+  'hold',
+  'stopped',
   'completed',
 ] as const;
 
-export const TASK_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
-
-export const TASK_TYPES = ['task', 'bug', 'story', 'admin'] as const;
-
-export const TASK_TYPE_LABELS: Record<TaskType, string> = {
-  task: 'Task',
-  bug: 'Bug',
-  story: 'Story',
-  admin: 'Admin',
-};
-
-/** Jira's issue-type square fills. */
-export const TASK_TYPE_FILL: Record<TaskType, string> = {
-  task: '#4BADE8',
-  bug: '#E5493A',
-  story: '#65BA43',
-  admin: '#6B778C',
-};
+export const TASK_PRIORITIES = ['high', 'medium', 'low'] as const;
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-  not_started: 'Not started',
-  in_progress: 'In progress',
-  blocked: 'Blocked',
-  submitted: 'Submitted',
-  approved: 'Approved',
+  upcoming: 'Upcoming',
+  ongoing: 'Ongoing',
+  hold: 'Hold',
+  stopped: 'Stopped',
   completed: 'Completed',
 };
 
-/**
- * Lozenge pairings, Atlassian exact. Filled rectangles, not dots and not pills.
- * Values resolve through the .jira-table token block in src/index.css so dark
- * mode keeps the same text/background contrast relationship.
- */
+/** Filled rectangles, not dots and not pills. */
 export const TASK_STATUS_LOZENGE: Record<TaskStatus, { bg: string; fg: string }> = {
-  not_started: { bg: 'var(--n30)', fg: 'var(--n500)' },
-  in_progress: { bg: 'var(--b50)', fg: 'var(--b400)' },
-  blocked: { bg: 'var(--r50)', fg: 'var(--r400)' },
-  submitted: { bg: 'var(--y75)', fg: 'var(--y700)' },
-  approved: { bg: 'var(--g50)', fg: 'var(--g400)' },
+  upcoming: { bg: 'var(--n30)', fg: 'var(--n500)' },
+  ongoing: { bg: 'var(--b50)', fg: 'var(--b400)' },
+  hold: { bg: 'var(--y75)', fg: 'var(--y400)' },
+  stopped: { bg: 'var(--r50)', fg: 'var(--r400)' },
   completed: { bg: 'var(--g50)', fg: 'var(--g400)' },
 };
 
-/** Priority is an icon only, no text label. Tooltip carries the name. */
-export const TASK_PRIORITY_COLOR: Record<TaskPriority, string> = {
-  critical: '#CD1317',
-  high: '#E9494A',
-  medium: '#E9730C',
-  low: '#2E7CD6',
-};
-
 export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
-  critical: 'Critical',
   high: 'High',
   medium: 'Medium',
   low: 'Low',
 };
 
-export const COLLABORATOR_ROLES = ['contributor', 'reviewer'] as const;
-
-export const COLLABORATOR_ROLE_LABELS: Record<CollaboratorRole, string> = {
-  contributor: 'Contributor',
-  reviewer: 'Reviewer',
+/** Icon plus label, unlike Jira's icon-only priority: the spec asks for both. */
+export const TASK_PRIORITY_COLOR: Record<TaskPriority, string> = {
+  high: '#E9494A',
+  medium: '#E9730C',
+  low: '#2E7CD6',
 };

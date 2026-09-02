@@ -86,117 +86,90 @@ were deleted from the database. `@dnd-kit/core` and `pdfkit` went with them.
 
 ## Work Tracker
 
-One screen at `/work-tracker`: a header strip and a single editable table where
-every field is changed in place. Backed by `tasks`, `task_collaborators` and
-`task_activity` in `db/work-tracker.sql`.
+One screen at `/work-tracker`: a dense Jira-style table where every row is a
+piece of work and every field is edited in place. Backed by `tasks`,
+`task_activity` and `users` in `db/work-tracker.sql`.
 
-### Table anatomy
+**One table for the whole team.** `tasks` is filtered by `user_id`; there is no
+table, schema or database per person. The person filter is a WHERE clause.
+**One person per task** — there is no collaborators table.
 
-The table is built to **Atlassian/Jira anatomy**, not this app's usual style:
-Jira neutrals, 32px dense rows, a `border-bottom` and no left colour bar,
-filled uppercase lozenges for status, icon-only priority, and avatar-only people
-columns with the name in the tooltip. Rows are uniform — collaborator rows are
-deliberately **not** tinted; the stacked avatars in the With column carry that
-signal, and a collaborator with their own `member_due_date` gets a small dot on
-their avatar.
+### Pipeline and rules
 
-Those tokens are scoped to `.jira-table` in `src/index.css`, so the surrounding
-MCCIA shell, nav and buttons keep their own language. The module spec asks both
-for Jira's exact table and for the existing MCCIA tokens; scoping is what lets
-both be true.
+`upcoming` → `ongoing` → `hold` → `stopped` → `completed`. Priority is `high`,
+`medium`, `low`.
 
-Columns run Type, Key, Summary, Assignee, With, Status, Priority, Allocated,
-Due, Deadline, Completed, Reports to, Approver, Approved. **The first four are
-sticky**; everything from With rightward scrolls. Column visibility is
+- Completing stamps `completed_at`; leaving `completed` clears it.
+- **Approval is a separate action, not a status.** The Approve item in the row
+  menu is enabled only when the work is completed and the current person is its
+  `approver_id`. Reopening completed work drops the approval, because work that
+  is no longer finished cannot stay signed off.
+- `deadline_date` can never be earlier than `due_date` — enforced in the form,
+  in the API against the merged row, and as a CHECK constraint.
+- Every field change appends to `task_activity`; roster changes append to
+  `user_activity`.
+
+### Late, slipped, at risk
+
+Computed per query, never stored, so they cannot go stale.
+
+- **Overdue** — the deadline has passed (or the due date, when no deadline is
+  set) and the work is still live. Missing the working target is not enough:
+  `due_date` is a target, `deadline_date` is the limit. Stopped and completed
+  work is never late.
+- **Slipped** — past the working target but still inside the deadline. Shown as
+  an amber due date, so a stricter overdue rule does not leave a slipped target
+  with no signal.
+- **Past deadline** — the hard limit has gone by. Red and bold.
+- **At risk** — deadline within three days and still live.
+
+### The four header blocks
+
+- **Group** — whose work is on screen. Click it for the roster.
+- **I am** — who is filing the work. New rows are theirs, and approval is
+  checked against them. Separate from Group, so you can read a colleague's list
+  while adding your own task.
+- **Today** — the IST date with today's due and overdue counts.
+- **At risk** — deadlines inside three days.
+
+Three tabs: All work, Assigned to me, Overdue. Status and priority filter from
+their own **column headers**; Name, Title and the three dates **sort** from
+theirs, case-insensitively. All of it stays in the URL.
+
+### Columns
+
+Name, Title, Priority, Status, Allocation, Due, Deadline, Reports to, Approver,
+and the row menu. **Name is sticky**; the rest scroll. Column visibility is
 per-user in `localStorage`.
-
-Dark mode is kept rather than dropped: spec 6.6 puts it out of scope "unless
-MCCIA OS already has it", and it does. Atlassian publishes light values only,
-so `.dark .jira-table` resolves the same roles against a dark surface, keeping
-each lozenge's text/background pairing intact.
-
-**One table for the whole team.** `tasks` is filtered by `assignee_id`; there is
-no table, schema or database per person. The user dropdown is a filter, not a
-database switch — splitting per user would make the team view, the overdue
-report and the workload summary impossible to build.
-
-### Rules
-
-- **Status pipeline:** not started → in progress → blocked → submitted →
-  approved → completed.
-- **Issue type** is `task`, `bug`, `story` or `admin`, shown as the coloured
-  square in the first column.
-- Moving to `submitted` stamps `completed_at`; moving to `approved` stamps
-  `approved_at`. Moving back out clears them and writes an activity row.
-- **Only the task's approver may set `approved`.** The option renders disabled
-  with a tooltip naming who can, and the API rejects it with `403` — a disabled
-  `<option>` is not a boundary.
-- **`deadline` can never be earlier than `due_date`**, enforced in the form, in
-  the API against the merged row, and as a CHECK constraint.
-- `is_overdue`, `days_left` and `at_risk` are **computed per query, never
-  stored**, so they cannot go stale.
-- Every status, assignee or date change appends to `task_activity`.
-- Refs (`WT-0001`) come from a database trigger over a sequence.
-
-### Editing
-
-Click a cell and change it. Dropdowns and dates save on change, text on blur or
-Enter, Escape reverts. Updates are optimistic: the value paints immediately, and
-a failure rolls back that one cell and shows the error beneath it rather than
-failing the page. The toolbar shows "Saving…" then "Saved 2s ago" — no toasts,
-which get unbearable across twenty edits. Tab moves to the next cell, arrows
-move the focused cell.
-
-Text cells never fire a request per keystroke, so the 400ms debounce the spec
-asks for is not needed — commit happens on blur or Enter.
-
-### The two header blocks
-
-- **Group** — whose work is on screen. Click it to open the roster, pick a
-  person or Everyone. Filters the table and the tab badges.
-- **I am** — who is filing the work. New rows are assigned to this person and
-  the approve permission is checked against them. Deliberately separate from
-  Group, so you can look at a colleague's list while adding your own task.
-
-Status and priority filter from their own **column headers**, Jira-style, so
-neither takes space in the header. Both stay in the URL and compose with tabs.
 
 ### Identity
 
-There is no login. The **I am** block is treated as the current user: it gates
-the approve permission and owns new rows, and is passed to the API as
-`?actor=`. **This is a label, not authentication** — a caller can name anyone.
-Real enforcement needs the auth described above.
+There is no login. The **I am** block is treated as the current user and is
+passed to the API as `?actor=`. **This is a label, not authentication** — a
+caller can name anyone. Real enforcement needs the auth described above.
 
-### Settings passcode
+### Team and reporting lines
 
-Settings is behind a passcode, checked server-side against `SETTINGS_PASSCODE`
-(default `mccia1934`) so the value is never in the client bundle. The unlock
-lasts for the browser tab, not the device.
+Managed on the Settings page, behind the passcode, in the `users` table: name,
+email, designation, department, reports to, role and an active flag.
 
-**It hides the page, it does not protect the data.** Every route in this app is
-unauthenticated, so the same settings can be read and written directly through
-`/api/records` without ever seeing the prompt. It keeps the page out of casual
-reach; that is all.
-
-### Team roster
-
-Team members are managed on the Settings page and stored in the `users` table —
-name, designation, department, email, role and an active flag. The roster used
-to also exist as a list of names on the Settings record; that is gone, so the
-team lives in one place. Everything that needs names (the assignee pickers on
-Social and Messages, the import/export vocabularies) reads back from `users`.
-
-Someone who leaves should be marked **inactive** rather than removed: they drop
-out of every picker while their work history survives. Deleting is refused with
-a `409` while any task, collaboration or archived daily log still points at
-them.
+- **Deactivate, never delete.** The API refuses `DELETE` on a person outright:
+  removing one orphans every task, `reports_to` link and approver reference they
+  appear on. Deactivated people vanish from the pickers; their work stays.
+- **Reporting loops are blocked.** A recursive walk up the proposed manager's
+  chain rejects the change and names who already reports up to whom.
+- `reports_to` is a **default suggestion**: a new task pre-fills its `report_to`
+  from the assignee's manager, and the task keeps whatever it is set to
+  afterwards. Changing somebody's manager never rewrites existing tasks.
+- Email is **required by the form** from now on, though the column stays
+  nullable — the rows that predate this have none, and inventing addresses for
+  real people would be fabricating data.
 
 ### Sample data
 
-`node scripts/seed-work-tracker.mjs` adds 10 sample tasks spanning every status,
-two of them shared. `--clear` removes them again. Only tasks are invented: real
-people are never given invented emails or designations.
+`node scripts/seed-work-tracker.mjs` adds 10 sample tasks across all five
+statuses, including overdue, slipped and at-risk rows. `--clear` removes them.
+Only tasks are invented; real people are never given invented attributes.
 
 ## Workshops & Events
 
