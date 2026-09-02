@@ -123,18 +123,21 @@ Computed per query, never stored, so they cannot go stale.
 - **Past deadline** — the hard limit has gone by. Red and bold.
 - **At risk** — deadline within three days and still live.
 
-### The four header blocks
+### The toolbar
 
-- **Group** — whose work is on screen. Click it for the roster.
+One compact row above the table, nothing else between the title and the work:
+
+- **Tabs** — All work, Assigned to me, Overdue, each with a count badge.
+- **Person picker** — whose work is on screen, or Everyone.
 - **I am** — who is filing the work. New rows are theirs, and approval is
-  checked against them. Separate from Group, so you can read a colleague's list
-  while adding your own task.
-- **Today** — the IST date with today's due and overdue counts.
-- **At risk** — deadlines inside three days.
+  checked against them. Separate from the person picker on purpose, so you can
+  read a colleague's list while adding your own task.
+- **At risk** — an amber chip when anything has a deadline inside three days.
+- **New task**, and the autosave state.
 
-Three tabs: All work, Assigned to me, Overdue. Status and priority filter from
-their own **column headers**; Name, Title and the three dates **sort** from
-theirs, case-insensitively. All of it stays in the URL.
+Status and priority filter from their own **column headers**; Name, Title and
+the three dates **sort** from theirs, case-insensitively. All of it stays in
+the URL.
 
 ### Columns
 

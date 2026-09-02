@@ -19,7 +19,6 @@ import { Button, Card, EmptyState, ErrorState, Input, Select } from '@/component
 import { SlideOver } from '@/components/SlideOver';
 import {
   Avatar,
-  AvatarStack,
   EditableDate,
   EditableText,
   IconSelect,
@@ -38,7 +37,7 @@ import {
 } from '@/constants';
 import { istToday } from '@/lib/ist';
 import { cn } from '@/lib/utils';
-import type { AtRiskTask, Task, TaskPriority, TaskStatus, User } from '@/types';
+import type { Task, TaskPriority, TaskStatus, User } from '@/types';
 
 // DESIGN NOTE. The table is Atlassian/Jira anatomy: Jira neutrals, 32px rows,
 // filled lozenges, a border-bottom and no colour bar. Those tokens are scoped
@@ -188,6 +187,7 @@ export default function WorkTracker() {
     queryKey: ['tracker-at-risk', user],
     queryFn: () => trackerApi.atRisk(user || undefined),
   });
+  const atRiskCount = atRisk.data?.tasks.length ?? 0;
 
   const tasks = tasksQuery.data?.tasks ?? [];
 
@@ -402,8 +402,12 @@ export default function WorkTracker() {
         }
       />
 
-      {/* ---- Tabs ---- */}
-      <div className="mb-4 overflow-x-auto">
+      {/* ---- One toolbar row: tabs, then the controls. ----
+          The four header cards that used to sit here were too heavy for what
+          they carried. Everything they did still exists: the person picker and
+          "I am" are compact selects, overdue lives on its own tab badge, and
+          at-risk is the chip below. */}
+      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="inline-flex gap-1 rounded-full bg-slate-100 p-1 dark:bg-slate-800">
           {TABS.filter((t) => t.key !== 'assigned_to_me' || user).map((t) => {
             const n = counts.data?.[t.key];
@@ -434,45 +438,72 @@ export default function WorkTracker() {
             );
           })}
         </div>
-      </div>
 
-      {/* ---- Header blocks. Stack below 900px. ---- */}
-      <div className="mb-4 grid items-start gap-3 min-[900px]:grid-cols-2 min-[1400px]:grid-cols-4">
-        <GroupBlock
-          users={users}
-          selected={user}
-          loading={usersQuery.isLoading}
-          counts={counts.data}
-          onSelect={(id) => set({ user: id })}
-        />
-        <IAmBlock
-          users={users}
-          selected={iAm}
-          loading={usersQuery.isLoading}
-          onSelect={setIAm}
-          onAdd={() => setAdding(true)}
-        />
-        <TodayBlock
-          data={today.data}
-          loading={today.isLoading}
-          onPick={(t) => set({ tab: t })}
-        />
-        <AtRiskBlock tasks={atRisk.data?.tasks ?? []} loading={atRisk.isLoading} />
-      </div>
+        {/* Whose work is on screen. */}
+        <div className="w-40">
+          <Select
+            value={user}
+            onChange={(e) => set({ user: e.target.value })}
+            aria-label="Whose work to show"
+            className="py-1.5 text-sm"
+          >
+            <option value="">Everyone</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </Select>
+        </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {anyFilter && (
-          <Button variant="ghost" size="sm" onClick={() => set({ tab: '', status: '', priority: '' })}>
-            Clear filters
-          </Button>
+        {/* Who is filing the work. Separate on purpose: you can read a
+            colleague's list while adding your own task. */}
+        <label className="flex items-center gap-1.5">
+          <span className="whitespace-nowrap text-xs text-slate-400">I am</span>
+          <span className="w-36">
+            <Select
+              value={iAm}
+              onChange={(e) => setIAm(e.target.value)}
+              aria-label="Who is adding this work"
+              className="py-1.5 text-sm"
+            >
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </Select>
+          </span>
+        </label>
+
+        {atRiskCount > 0 && (
+          <button
+            onClick={() => set({ tab: 'overdue' })}
+            title={`${atRiskCount} with a deadline inside three days`}
+            className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {atRiskCount} at risk
+          </button>
         )}
-        <span className="ml-auto text-xs text-slate-400" aria-live="polite">
-          {saveState === 'saving'
-            ? 'Saving…'
-            : savedAt
-              ? `Saved ${Math.max(1, Math.round((Date.now() - savedAt) / 1000))}s ago`
-              : ''}
-        </span>
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-slate-400" aria-live="polite">
+            {saveState === 'saving'
+              ? 'Saving…'
+              : savedAt
+                ? `Saved ${Math.max(1, Math.round((Date.now() - savedAt) / 1000))}s ago`
+                : ''}
+          </span>
+          {anyFilter && (
+            <Button variant="ghost" size="sm" onClick={() => set({ tab: '', status: '', priority: '' })}>
+              Clear filters
+            </Button>
+          )}
+          <Button size="sm" onClick={() => setAdding(true)} disabled={users.length === 0}>
+            <Plus className="h-4 w-4" /> New task
+          </Button>
+        </div>
       </div>
 
       {loadError && (
@@ -624,250 +655,6 @@ export default function WorkTracker() {
 
       <ActivityPanel task={activityFor} onClose={() => setActivityFor(null)} />
     </div>
-  );
-}
-
-// ---- Header blocks ---------------------------------------------------------
-
-/**
- * Whose work is on screen. Collapsed it names the person; opening it lists
- * everyone, so picking is one click rather than hunting a dropdown.
- */
-function GroupBlock({
-  users,
-  selected,
-  loading,
-  counts,
-  onSelect,
-}: {
-  users: User[];
-  selected: string;
-  loading: boolean;
-  counts?: { all: number; overdue: number };
-  onSelect: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  useEscape(open, () => setOpen(false));
-  const person = users.find((u) => u.id === selected) ?? null;
-
-  return (
-    <Card className="p-3">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:hover:bg-slate-800"
-      >
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Group</p>
-          {loading ? (
-            <span className="mt-1 block h-5 w-32 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          ) : person ? (
-            <>
-              <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
-                {person.name}
-              </p>
-              <p className="truncate text-xs text-slate-400">
-                {person.designation ?? 'No designation set'}
-                {counts ? ` · ${counts.all} open` : ''}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="font-semibold text-slate-900 dark:text-slate-100">Everyone</p>
-              <p className="truncate text-xs text-slate-400">
-                {users.length} {users.length === 1 ? 'person' : 'people'}
-                {counts ? ` · ${counts.all} open` : ''}
-              </p>
-            </>
-          )}
-        </div>
-        {person ? (
-          <Avatar name={person.name} size={32} />
-        ) : (
-          users.length > 0 && <AvatarStack people={users.map((u) => ({ name: u.name }))} max={3} />
-        )}
-        <ChevronDown
-          className={cn('h-4 w-4 shrink-0 text-slate-400 transition-transform', open && 'rotate-180')}
-        />
-      </button>
-
-      {open && (
-        <ul className="mt-2 max-h-52 overflow-y-auto border-t border-slate-100 pt-2 dark:border-slate-800">
-          <li>
-            <button
-              onClick={() => {
-                onSelect('');
-                setOpen(false);
-              }}
-              className={cn(
-                'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
-                !selected && 'font-medium text-brand-700 dark:text-brand-300',
-              )}
-            >
-              <Users2 className="h-4 w-4 text-slate-400" />
-              Everyone
-            </button>
-          </li>
-          {users.map((u) => (
-            <li key={u.id}>
-              <button
-                onClick={() => {
-                  onSelect(u.id);
-                  setOpen(false);
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800',
-                  selected === u.id && 'font-medium text-brand-700 dark:text-brand-300',
-                )}
-              >
-                <Avatar name={u.name} size={20} />
-                <span className="min-w-0 flex-1 truncate">{u.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
-
-/** Who is filing the work. New rows are theirs, and approval checks against it. */
-function IAmBlock({
-  users,
-  selected,
-  loading,
-  onSelect,
-  onAdd,
-}: {
-  users: User[];
-  selected: string;
-  loading: boolean;
-  onSelect: (id: string) => void;
-  onAdd: () => void;
-}) {
-  const me = users.find((u) => u.id === selected) ?? null;
-  return (
-    <Card className="p-3">
-      <p className="px-1 text-xs font-medium uppercase tracking-wide text-slate-400">I am</p>
-      {loading ? (
-        <span className="mt-2 block h-9 w-40 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-      ) : users.length === 0 ? (
-        <p className="mt-2 px-1 text-sm text-slate-400">
-          Nobody on the team yet. Add people in Settings.
-        </p>
-      ) : (
-        <>
-          <div className="mt-1.5 flex items-center gap-2 px-1">
-            {me && <Avatar name={me.name} size={28} />}
-            <Select
-              value={selected}
-              onChange={(e) => onSelect(e.target.value)}
-              aria-label="Who is adding this work"
-            >
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <Button size="sm" className="mt-2 w-full" onClick={onAdd}>
-            <Plus className="h-4 w-4" /> New task
-          </Button>
-        </>
-      )}
-    </Card>
-  );
-}
-
-function TodayBlock({
-  data,
-  loading,
-  onPick,
-}: {
-  data?: { date: string; dueToday: number; overdue: number };
-  loading: boolean;
-  onPick: (tab: TabKey) => void;
-}) {
-  return (
-    <Card className="p-3">
-      <p className="px-1 text-xs font-medium uppercase tracking-wide text-slate-400">Today</p>
-      {loading || !data ? (
-        <div className="mt-2 space-y-2 px-1">
-          <div className="h-5 w-28 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          <div className="h-4 w-32 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-        </div>
-      ) : (
-        <>
-          <p className="mt-1 px-1 font-semibold text-slate-900 dark:text-slate-100">
-            {formatJiraDate(data.date)}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 px-1 text-sm">
-            <span className="tabular-nums text-slate-500">
-              <span className="font-semibold text-slate-800 dark:text-slate-100">
-                {data.dueToday}
-              </span>{' '}
-              due
-            </span>
-            <button
-              onClick={() => onPick('overdue')}
-              className={cn(
-                'tabular-nums hover:underline',
-                data.overdue > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400',
-              )}
-            >
-              <span className="font-semibold">{data.overdue}</span> overdue
-            </button>
-          </div>
-        </>
-      )}
-    </Card>
-  );
-}
-
-/** Deadline within three days and still live. */
-function AtRiskBlock({ tasks, loading }: { tasks: AtRiskTask[]; loading: boolean }) {
-  const shown = tasks.slice(0, 4);
-  const extra = tasks.length - shown.length;
-  return (
-    <Card className="p-3">
-      <div className="flex items-center justify-between px-1">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">At risk</p>
-        <span className="text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-          {loading ? '' : tasks.length}
-        </span>
-      </div>
-      {loading ? (
-        <div className="mt-2 space-y-2 px-1">
-          {[0, 1].map((i) => (
-            <div key={i} className="h-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-          ))}
-        </div>
-      ) : shown.length === 0 ? (
-        // A statement rather than an empty box, so the row does not change
-        // height when nothing happens to be at risk.
-        <p className="mt-2 px-1 text-sm text-slate-400">Nothing at risk</p>
-      ) : (
-        <ul className="mt-1 divide-y divide-slate-100 dark:divide-slate-800">
-          {shown.map((t) => (
-            <li key={t.id} className="flex items-center gap-2 px-1 py-1">
-              <span
-                className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-200"
-                title={`${t.title} · ${t.userName}`}
-              >
-                {t.title}
-              </span>
-              <span className="shrink-0 text-xs tabular-nums text-amber-600 dark:text-amber-400">
-                {formatJiraDate(t.deadlineDate)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {extra > 0 && (
-        <p className="mt-1 px-1 text-xs text-slate-400">+{extra} more</p>
-      )}
-    </Card>
   );
 }
 
