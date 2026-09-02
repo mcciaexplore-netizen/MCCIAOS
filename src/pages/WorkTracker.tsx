@@ -808,7 +808,12 @@ export default function WorkTracker() {
             {/* A ten-column table does not scroll usefully on a phone. */}
             <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
               {tasks.map((t) => (
-                <MobileCard key={t.id} task={t} onSave={save} />
+                <MobileCard
+                  key={t.id}
+                  task={t}
+                  personColour={users.find((u) => u.id === t.userId)?.colour}
+                  onSave={save}
+                />
               ))}
             </ul>
           </>
@@ -1224,7 +1229,9 @@ function NewTaskRow({
 }) {
   const [pickedUser, setPickedUser] = useState(defaultUser ?? users[0]?.id ?? '');
   const userId = lockedUser ?? pickedUser;
-  const lockedName = lockedUser ? users.find((u) => u.id === lockedUser)?.name : undefined;
+  const lockedPerson = lockedUser ? users.find((u) => u.id === lockedUser) : undefined;
+  const lockedName = lockedPerson?.name;
+  const lockedColour = lockedPerson?.colour;
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [statusValue, setStatusValue] = useState<TaskStatus>('upcoming');
@@ -1287,7 +1294,7 @@ function NewTaskRow({
           <td className="sticky z-10" style={{ left: 0, background: 'inherit' }}>
             {lockedUser ? (
               <span className="flex min-w-0 items-center gap-1.5 px-2">
-                <Avatar name={lockedName ?? ''} size={24} />
+                <Avatar name={lockedName ?? ''} colour={lockedColour} size={24} />
                 <span
                   title={lockedName}
                   style={{ color: 'var(--n800)' }}
@@ -1447,16 +1454,18 @@ function NewTaskRow({
 /** Below 768px the table becomes cards; editing opens a bottom sheet. */
 function MobileCard({
   task,
+  personColour,
   onSave,
 }: {
   task: Task;
+  personColour?: string | null;
   onSave: (id: string, field: string, value: unknown) => void;
 }) {
   const [sheet, setSheet] = useState<null | 'status' | 'priority'>(null);
   return (
     <li className={cn('border-l-4 px-4 py-3', task.isOverdue ? 'border-l-rose-500' : 'border-l-transparent')}>
       <div className="flex items-start gap-2">
-        <Avatar name={task.userName} size={24} />
+        <Avatar name={task.userName} colour={personColour} size={24} />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-slate-800 dark:text-slate-100">{task.title}</p>
           <p className="text-[11px] text-slate-400">{task.userName}</p>

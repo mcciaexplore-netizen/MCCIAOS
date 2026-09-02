@@ -214,6 +214,12 @@ export interface User {
    */
   canBeReportedTo: boolean;
   canApprove: boolean;
+  /**
+   * Avatar colour, #rrggbb. Null means nobody has chosen one, and the avatar
+   * falls back to the tint derived from the name — so this is an override, not
+   * a requirement.
+   */
+  colour: string | null;
 }
 
 /** The pipeline. Approval is a separate action, not a status. */

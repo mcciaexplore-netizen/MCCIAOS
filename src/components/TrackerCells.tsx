@@ -36,12 +36,19 @@ import type { TaskPriority, TaskStatus, User } from '@/types';
  */
 export function Avatar({
   name,
+  colour,
   size = 24,
   ring = false,
   dot = false,
   className,
 }: {
   name: string;
+  /**
+   * The person's chosen colour. Falls back to the tint derived from the name,
+   * so an avatar still renders for anyone who has not picked one — and so this
+   * is an override rather than something that must be filled in.
+   */
+  colour?: string | null;
   size?: number;
   ring?: boolean;
   /** Marks a collaborator who carries their own due date. */
@@ -58,7 +65,7 @@ export function Avatar({
           width: size,
           height: size,
           fontSize: Math.round(size * 0.42),
-          background: tintFor(name),
+          background: colour || tintFor(name),
           color: '#fff',
           boxShadow: ring ? '0 0 0 2px var(--n0)' : undefined,
         }}
@@ -98,7 +105,7 @@ export function AvatarStack({
   people,
   max = 3,
 }: {
-  people: { name: string; dot?: boolean }[];
+  people: { name: string; colour?: string | null; dot?: boolean }[];
   max?: number;
 }) {
   const shown = people.slice(0, max);
@@ -109,6 +116,7 @@ export function AvatarStack({
         <Avatar
           key={p.name + i}
           name={p.name}
+          colour={p.colour}
           size={24}
           ring
           dot={p.dot}
@@ -636,7 +644,7 @@ export function UserCell({
         <span className="pointer-events-none absolute inset-0 flex items-center gap-1.5">
           {current ? (
             <>
-              <Avatar name={current.name} size={24} />
+              <Avatar name={current.name} colour={current.colour} size={24} />
               <span
                 title={current.name}
                 style={{ color: 'var(--n800)' }}

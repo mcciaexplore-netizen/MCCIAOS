@@ -163,7 +163,7 @@ function toTask(row: TaskRow): Task {
 const USER_COLUMNS = `
   u.id, u.name, u.email, u.role, u.designation, u.department,
   u.reports_to, m.name as reports_to_name, u.avatar_url, u.is_active,
-  u.can_be_reported_to, u.can_approve
+  u.can_be_reported_to, u.can_approve, u.colour
 `;
 
 function toUser(r: Record<string, unknown>): User {
@@ -180,6 +180,7 @@ function toUser(r: Record<string, unknown>): User {
     isActive: Boolean(r.is_active),
     canBeReportedTo: Boolean(r.can_be_reported_to),
     canApprove: Boolean(r.can_approve),
+    colour: (r.colour as string | null) ?? null,
   };
 }
 
@@ -743,6 +744,7 @@ export interface UserWriteInput {
   canApprove?: boolean;
   role?: 'ADMIN' | 'MEMBER';
   isActive?: boolean;
+  colour?: string | null;
 }
 
 /**
@@ -851,6 +853,7 @@ export async function updateUser(
     set('can_be_reported_to', 'canBeReportedTo', Boolean(patch.canBeReportedTo));
   if (patch.canApprove !== undefined)
     set('can_approve', 'canApprove', Boolean(patch.canApprove));
+  if (patch.colour !== undefined) set('colour', 'colour', blank(patch.colour));
 
   if (sets.length === 0) return existing;
 

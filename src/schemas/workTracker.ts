@@ -96,6 +96,11 @@ const userFields = z.object({
   reportsTo: uuid.nullable().optional(),
   role: z.enum(['ADMIN', 'MEMBER']).default('MEMBER'),
   isActive: z.boolean().default(true),
+  colour: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, 'Use a six-digit hex colour')
+    .nullable()
+    .optional(),
   canBeReportedTo: z.boolean().optional(),
   canApprove: z.boolean().optional(),
 });

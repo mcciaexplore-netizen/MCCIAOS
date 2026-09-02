@@ -27,6 +27,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
+import { Avatar } from '@/components/TrackerCells';
+import { PersonTasks } from '@/components/PersonTasks';
 import { ORG_SECTIONS, OrgSettingsForm, type Section } from '@/components/OrgSettingsForm';
 import {
   Badge,
@@ -332,7 +334,7 @@ function SettingsInner() {
           "Save changes" buttons on screen meaning different things. */}
       {/* Not `hidden`: the element carries Tailwind's `flex`, and display:flex
           beats [hidden]'s display:none, so the bar stayed on screen. */}
-      {!tab.org && (
+      {!tab.org && !tab.custom && (
       <div className="sticky bottom-4 z-20 mt-5 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/90">
         <p className="text-sm text-slate-500">
           {dirty ? (
@@ -666,6 +668,8 @@ function WorkTrackerAdmin() {
   const { toast } = useToast();
   const { unlocked, setUnlocked } = useEditLock();
   const [confirming, setConfirming] = useState<string | null>(null);
+  /** Whose task list is open. One at a time: two long tables at once is a wall. */
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const usersQuery = useQuery({
     queryKey: ['tracker-users', 'all'],
@@ -840,46 +844,68 @@ function WorkTrackerAdmin() {
           {users.map((u) => {
             const n = counts[u.id] ?? 0;
             const asking = confirming === u.id;
+            const open = expanded === u.id;
             return (
-              <li key={u.id} className="flex items-center gap-3 py-2">
-                <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-200">
-                  {u.name}
-                </span>
-                <span className="shrink-0 text-xs tabular-nums text-slate-400">
-                  {n} task{n === 1 ? '' : 's'}
-                </span>
-                {asking ? (
-                  <span className="flex shrink-0 items-center gap-1">
+              <li key={u.id} className="py-2">
+                <div className="flex items-center gap-3">
+                  {/* The name is the control. A count you cannot open is a dead
+                      end — this makes it the way in to the work it counts. */}
+                  <button
+                    onClick={() => setExpanded(open ? null : u.id)}
+                    aria-expanded={open}
+                    disabled={n === 0}
+                    title={n === 0 ? `${u.name} has nothing on` : `Show ${u.name}'s work`}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+                  >
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 shrink-0 text-slate-400 transition-transform',
+                        open && 'rotate-180',
+                        n === 0 && 'opacity-0',
+                      )}
+                    />
+                    <Avatar name={u.name} colour={u.colour} size={22} />
+                    <span className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-200">
+                      {u.name}
+                    </span>
+                  </button>
+                  <span className="shrink-0 text-xs tabular-nums text-slate-400">
+                    {n} task{n === 1 ? '' : 's'}
+                  </span>
+                  {asking ? (
+                    <span className="flex shrink-0 items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={clear.isPending}
+                        onClick={() => clear.mutate(u.id)}
+                      >
+                        {clear.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Clear {n}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                        Cancel
+                      </Button>
+                    </span>
+                  ) : (
                     <Button
                       size="sm"
-                      variant="danger"
-                      disabled={clear.isPending}
-                      onClick={() => clear.mutate(u.id)}
+                      variant="ghost"
+                      disabled={n === 0}
+                      onClick={() => setConfirming(u.id)}
+                      title={
+                        n === 0
+                          ? `${u.name} has no work to clear`
+                          : `Clear all ${n} of ${u.name}'s tasks`
+                      }
+                      className="shrink-0"
                     >
-                      {clear.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                      Clear {n}
+                      <Trash2 className="h-4 w-4" />
+                      Clear
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
-                      Cancel
-                    </Button>
-                  </span>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={n === 0}
-                    onClick={() => setConfirming(u.id)}
-                    title={
-                      n === 0
-                        ? `${u.name} has no work to clear`
-                        : `Clear all ${n} of ${u.name}'s tasks`
-                    }
-                    className="shrink-0"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Clear
-                  </Button>
-                )}
+                  )}
+                </div>
+                {open && <PersonTasks person={u} users={users} />}
               </li>
             );
           })}
@@ -1056,6 +1082,24 @@ function MemberRow({
       )}
     >
       <div className="flex items-center gap-3">
+        {/* The person's colour, edited where the person is. A native colour
+            input rather than a palette of swatches: it is one control, it is
+            keyboard accessible for free, and it does not cap the choice at
+            whatever set we happened to pick. */}
+        <label
+          title={`Avatar colour for ${user.name}`}
+          className="relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center"
+        >
+          <span className="sr-only">Avatar colour for {user.name}</span>
+          <Avatar name={user.name} colour={user.colour} size={28} />
+          <input
+            type="color"
+            value={user.colour ?? '#64748b'}
+            disabled={saving}
+            onChange={(e) => onPatch({ colour: e.target.value })}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          />
+        </label>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
             {user.name}
