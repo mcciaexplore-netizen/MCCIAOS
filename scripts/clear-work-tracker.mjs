@@ -26,6 +26,8 @@ if (!process.env.DATABASE_URL) {
 
 const sql = neon(process.env.DATABASE_URL);
 
+// Everything, including work already hidden by a soft delete: this is the
+// wipe, so the backup has to be able to reconstruct the whole table.
 const tasks = await sql`
   select t.*, u.name as user_name
     from tasks t join users u on u.id = t.user_id
@@ -45,7 +47,9 @@ writeFileSync(
   JSON.stringify({ savedAt: new Date().toISOString(), tasks, task_activity: activity }, null, 2),
 );
 console.log(`backed up ${tasks.length} task(s) -> ${path}`);
-for (const t of tasks) console.log(`   - ${t.title}  |  ${t.user_name}`);
+for (const t of tasks) {
+  console.log(`   - ${t.title}  |  ${t.user_name}${t.deleted_at ? '  (already removed)' : ''}`);
+}
 
 await sql`delete from task_activity`;
 const removed = await sql`delete from tasks returning id`;

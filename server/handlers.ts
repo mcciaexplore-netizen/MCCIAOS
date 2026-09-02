@@ -28,6 +28,7 @@ import {
   createUser,
   deactivateUser,
   deleteTask,
+  restoreTask,
   getActivity,
   getAtRisk,
   getTabCounts,
@@ -760,9 +761,23 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     }
 
     // ---- /api/tasks/:id[/approve] ------------------------------------------
-    const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(approve))?$/);
+    const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(approve|restore))?$/);
     if (taskMatch) {
       const [, id, sub] = taskMatch;
+
+      // Undo for a removal. Passcode-gated like the delete it reverses.
+      if (sub === 'restore') {
+        if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+        if (!holdsPasscode(req)) {
+          return json(403, {
+            error: 'Restoring removed work needs the admin passcode.',
+            locked: ['task'],
+          });
+        }
+        const task = await restoreTask(id, actor);
+        if (!task) return json(404, { error: 'Not found, or it was never removed' });
+        return json(200, { task });
+      }
 
       if (sub === 'approve') {
         if (method !== 'POST') return json(405, { error: 'Method not allowed' });
@@ -821,7 +836,7 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
             locked: ['task'],
           });
         }
-        const ok = await deleteTask(id);
+        const ok = await deleteTask(id, actor);
         if (!ok) return json(404, { error: 'Not found' });
         return json(200, { success: true });
       }

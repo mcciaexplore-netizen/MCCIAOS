@@ -163,6 +163,17 @@ export const trackerApi = {
     });
   },
 
+  /**
+   * Puts back a task that was removed. Removal hides the row rather than
+   * destroying it, so this is a real undo rather than a re-creation.
+   */
+  restore(id: string, actor?: string) {
+    return request<{ task: Task }>(`/api/tasks/${id}/restore?${qs({ actor })}`, {
+      method: 'POST',
+      authorised: true,
+    });
+  },
+
   /** Approval is an action, not a status. Approver-only, completed work only. */
   approve(id: string, actor?: string) {
     return request<{ task: Task }>(`/api/tasks/${id}/approve?${qs({ actor })}`, {

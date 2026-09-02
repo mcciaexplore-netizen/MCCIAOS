@@ -9,14 +9,29 @@ import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type ToastTone = 'success' | 'error' | 'info';
+
+/**
+ * An offer to reverse what just happened, shown inside the toast.
+ *
+ * The point of an undo is that it is reachable in the moment, so it lives where
+ * the confirmation already is rather than somewhere the person has to go
+ * looking. Given a longer life than a plain toast — three and a half seconds is
+ * enough to read a message, not enough to decide you regret something.
+ */
+export interface ToastAction {
+  label: string;
+  onAct: () => void;
+}
+
 interface Toast {
   id: number;
   message: string;
   tone: ToastTone;
+  action?: ToastAction;
 }
 
 interface ToastValue {
-  toast: (message: string, tone?: ToastTone) => void;
+  toast: (message: string, tone?: ToastTone, action?: ToastAction) => void;
 }
 
 const ToastCtx = createContext<ToastValue | null>(null);
@@ -31,10 +46,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toast = useCallback(
-    (message: string, tone: ToastTone = 'success') => {
+    (message: string, tone: ToastTone = 'success', action?: ToastAction) => {
       const id = ++counter;
-      setToasts((t) => [...t, { id, message, tone }]);
-      setTimeout(() => dismiss(id), 3500);
+      setToasts((t) => [...t, { id, message, tone, action }]);
+      setTimeout(() => dismiss(id), action ? 10000 : 3500);
     },
     [dismiss],
   );
@@ -66,6 +81,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <span className="flex-1 text-slate-700 dark:text-slate-200">
               {t.message}
             </span>
+            {t.action && (
+              <button
+                onClick={() => {
+                  t.action?.onAct();
+                  dismiss(t.id);
+                }}
+                className="shrink-0 rounded px-1.5 py-0.5 text-sm font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-950"
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
               onClick={() => dismiss(t.id)}
               className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"

@@ -66,6 +66,12 @@ const OPEN = `('upcoming','ongoing','hold')`;
  * with no deadline falls back to its due date, otherwise it could never be late.
  */
 const LATE_DATE = `coalesce(t.deadline_date, t.due_date)`;
+/**
+ * Removed work is hidden, not destroyed (db/work-tracker-history.sql), so every
+ * read has to say so. Anything that counts or lists tasks and forgets this will
+ * quietly resurrect deleted work.
+ */
+const LIVE = `t.deleted_at is null`;
 
 // ---- Row shapes ------------------------------------------------------------
 
@@ -228,7 +234,8 @@ const SORTABLE: Record<string, string> = {
 };
 
 function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
-  const conditions: string[] = [];
+  // Seeded rather than appended: a filter is optional, being undeleted is not.
+  const conditions: string[] = [LIVE];
   const params: unknown[] = [];
   const bind = (v: unknown) => {
     params.push(v);
@@ -280,7 +287,7 @@ export async function getTask(id: string): Promise<Task | null> {
   if (!UUID_RE.test(id)) return null;
   const db = requireSql();
   const rows = (await db.query(
-    `select ${TASK_COLUMNS} ${TASK_JOINS} where t.id = $1::uuid`,
+    `select ${TASK_COLUMNS} ${TASK_JOINS} where t.id = $1::uuid and ${LIVE}`,
     [id],
   )) as TaskRow[];
   return rows[0] ? toTask(rows[0]) : null;
@@ -323,7 +330,8 @@ export async function getTabCounts(user?: string | null): Promise<TaskTabCounts>
        count(*) filter (where ($1::uuid is null or t.user_id = $1::uuid)
                           and ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
                           and t.status in ${OPEN})::int as overdue
-     from tasks t`,
+     from tasks t
+     where ${LIVE}`,
     [who],
   )) as Record<string, number>[];
   const r = rows[0] ?? {};
@@ -342,7 +350,7 @@ export async function getToday(user?: string | null): Promise<TodayCounts> {
        count(*) filter (where ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
                           and t.status in ${OPEN})::int as overdue
      from tasks t
-     where $1::uuid is null or t.user_id = $1::uuid`,
+     where ${LIVE} and ($1::uuid is null or t.user_id = $1::uuid)`,
     [who],
   )) as Record<string, string | number>[];
   const r = rows[0] ?? {};
@@ -361,7 +369,8 @@ export async function getAtRisk(user?: string | null): Promise<AtRiskTask[]> {
     `select t.id, t.title, uo.name as user_name,
             to_char(t.deadline_date, 'YYYY-MM-DD') as deadline_date
      from tasks t join users uo on uo.id = t.user_id
-     where t.deadline_date is not null
+     where ${LIVE}
+       and t.deadline_date is not null
        and t.deadline_date between ${TODAY} and ${TODAY} + 3
        and t.status in ${OPEN}
        and ($1::uuid is null or t.user_id = $1::uuid)
@@ -405,10 +414,15 @@ async function recordActivity(
       c.oldValue == null ? null : String(c.oldValue),
       c.newValue == null ? null : String(c.newValue),
     );
-    return `($1::uuid, $2::uuid, $${start + 1}, $${start + 2}, $${start + 3})`;
+    // The title is read from the task rather than passed in, so it is right for
+    // every caller without any of them having to remember. Soft delete is what
+    // makes this safe: the row is still there when its own removal is logged.
+    return `($1::uuid, $2::uuid, $${start + 1}, $${start + 2}, $${start + 3},
+             (select title from tasks where id = $1::uuid))`;
   });
   await db.query(
-    `insert into task_activity (task_id, actor_id, field, old_value, new_value)
+    `insert into task_activity
+       (task_id, actor_id, field, old_value, new_value, task_title)
      values ${tuples.join(', ')}`,
     params,
   );
@@ -582,14 +596,52 @@ export async function approveTask(
   return getTask(id);
 }
 
-export async function deleteTask(id: string): Promise<boolean> {
+/**
+ * Hides a task instead of destroying it.
+ *
+ * Removing work used to delete the row, and task_activity cascades, so the
+ * history went with it — nothing was left to say the task had existed or who
+ * removed it. That is inconsistent with a table where changing one filled field
+ * needs the admin passcode. Now the row stays, every read filters it out, and
+ * restoreTask can put it back.
+ */
+export async function deleteTask(
+  id: string,
+  actorId: string | null,
+): Promise<boolean> {
   if (!UUID_RE.test(id)) return false;
   const db = requireSql();
   const rows = (await db.query(
-    `delete from tasks where id = $1::uuid returning id`,
+    `update tasks set deleted_at = now()
+      where id = $1::uuid and deleted_at is null
+      returning id, title`,
     [id],
-  )) as { id: string }[];
-  return rows.length > 0;
+  )) as { id: string; title: string }[];
+  if (!rows[0]) return false;
+  await recordActivity(id, actorId, [
+    { field: 'deleted', oldValue: rows[0].title, newValue: null },
+  ]);
+  return true;
+}
+
+/** Puts back a task that was removed. Undo, and the reason hiding beats deleting. */
+export async function restoreTask(
+  id: string,
+  actorId: string | null,
+): Promise<Task | null> {
+  if (!UUID_RE.test(id)) return null;
+  const db = requireSql();
+  const rows = (await db.query(
+    `update tasks set deleted_at = null
+      where id = $1::uuid and deleted_at is not null
+      returning id, title`,
+    [id],
+  )) as { id: string; title: string }[];
+  if (!rows[0]) return null;
+  await recordActivity(id, actorId, [
+    { field: 'restored', oldValue: null, newValue: rows[0].title },
+  ]);
+  return getTask(id);
 }
 
 // ---- User management -------------------------------------------------------

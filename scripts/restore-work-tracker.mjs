@@ -5,7 +5,9 @@
  * Usage: node scripts/restore-work-tracker.mjs backups/work-tracker-<stamp>.json
  *
  * Restores every task in the file with its original id, so running it twice
- * changes nothing rather than creating duplicates. People are matched by the id
+ * changes nothing rather than creating duplicates. A task that was already
+ * removed when the backup was taken comes back removed, not live — the backup
+ * is a snapshot, not an amnesty. People are matched by the id
  * they had; a task whose person is no longer on the roster is reported and
  * skipped rather than quietly reassigned to somebody else.
  */
@@ -36,11 +38,13 @@ for (const t of tasks) {
   await sql`
     insert into tasks (id, user_id, title, priority, status, allocation_date,
                        due_date, deadline_date, report_to, approver_id,
-                       completed_at, approved_at, created_at, updated_at)
+                       completed_at, approved_at, created_at, updated_at,
+                       deleted_at)
     values (${t.id}::uuid, ${t.user_id}::uuid, ${t.title}, ${t.priority}, ${t.status},
             ${t.allocation_date}, ${t.due_date}, ${t.deadline_date},
             ${t.report_to}::uuid, ${t.approver_id}::uuid,
-            ${t.completed_at}, ${t.approved_at}, ${t.created_at}, ${t.updated_at})
+            ${t.completed_at}, ${t.approved_at}, ${t.created_at}, ${t.updated_at},
+            ${t.deleted_at ?? null})
     on conflict (id) do nothing`;
   restored++;
 }

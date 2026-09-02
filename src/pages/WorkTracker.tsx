@@ -297,12 +297,28 @@ export default function WorkTracker() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
-  const remove = useMutation({
-    mutationFn: (id: string) => trackerApi.remove(id),
+  const restore = useMutation({
+    mutationFn: (id: string) => trackerApi.restore(id, actor),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks'] });
       refreshAside();
-      toast('Task deleted');
+      toast('Task restored');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => trackerApi.remove(id),
+    // Removing hides the row rather than destroying it, so the offer to undo is
+    // a real one. It is made here, next to the confirmation, because that is
+    // the moment somebody realises they picked the wrong row.
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      refreshAside();
+      toast('Task deleted', 'success', {
+        label: 'Undo',
+        onAct: () => restore.mutate(id),
+      });
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });

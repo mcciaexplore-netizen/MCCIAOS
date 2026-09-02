@@ -340,6 +340,24 @@ db/              production SQL schema + one-time migrations,
    and everything else to the SPA.
 
 
+**Removing work does not destroy it.** Deleting a task sets `tasks.deleted_at`
+and every read filters on it, so the row and its history stay. The toast that
+confirms a deletion offers **Undo** for ten seconds, and
+`POST /api/tasks/:id/restore` does the same thing from the API — both need the
+passcode, like the delete they reverse.
+
+This exists because deletion was the one hole in the freeze. Changing a filled
+field needed the passcode, but deleting the row needed the same passcode and
+left nothing at all: `task_activity` cascades, so the trail went with it. A task
+called "Mail IIT's" was lost that way on 2026-09-02 and the database could not
+say what had happened to it. Each history row now also carries `task_title`, so
+the trail reads on its own and a later rename does not rewrite the past.
+
+Migration: `db/work-tracker-history.sql`, applied with
+`node scripts/migrate.mjs db/work-tracker-history.sql`. Additive and idempotent
+— it adds two columns and an index, drops nothing, and leaves every existing row
+visible.
+
 ## Clearing and restoring
 
 `node scripts/clear-work-tracker.mjs --yes` empties the tracker. It writes every
