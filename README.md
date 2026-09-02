@@ -338,3 +338,14 @@ db/              production SQL schema + one-time migrations,
    automatically whenever it is present.
 3. Deploy to Vercel — `vercel.json` routes `/api/*` to the catch-all function
    and everything else to the SPA.
+
+
+## Clearing and restoring
+
+`node scripts/clear-work-tracker.mjs --yes` empties the tracker. It writes every
+task to `backups/work-tracker-<timestamp>.json` first and prints the command
+that puts them back — `node scripts/restore-work-tracker.mjs <file>`, which
+restores each task under its original id, so running it twice is harmless. The
+roster in `users` is left alone either way: people are managed on the Settings
+page, and deleting them would orphan anything restored afterwards. `backups/` is
+gitignored.

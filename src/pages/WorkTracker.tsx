@@ -72,9 +72,9 @@ const COLUMNS = [
   { key: 'title', label: 'Title', width: 360, sticky: false, flex: true, sort: 'title' },
   { key: 'priority', label: 'Priority', width: 94, sticky: false, flex: false, sort: '' },
   { key: 'status', label: 'Status', width: 111, sticky: false, flex: false, sort: '' },
-  { key: 'allocation', label: 'Allocation', width: 84, sticky: false, flex: false, sort: 'allocation' },
-  { key: 'due', label: 'Due', width: 114, sticky: false, flex: false, sort: 'due' },
-  { key: 'deadline', label: 'Deadline', width: 114, sticky: false, flex: false, sort: 'deadline' },
+  { key: 'allocation', label: 'Allocation', width: 80, sticky: false, flex: false, sort: 'allocation' },
+  { key: 'due', label: 'Due', width: 130, sticky: false, flex: false, sort: 'due' },
+  { key: 'deadline', label: 'Deadline', width: 130, sticky: false, flex: false, sort: 'deadline' },
   { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
   { key: 'approver', label: 'Approver', width: 132, sticky: false, flex: false, sort: '' },
 ] as const;
@@ -335,11 +335,13 @@ export default function WorkTracker() {
    * fixed guess: a 132px column fits "Snahanku" and cuts "Vedshri Kulkarni".
    * 46px covers the avatar, its gap and the cell padding; the rest is the
    * longest name at roughly 7.8px a character, clamped so one very long name
-   * cannot swallow the table.
+   * cannot swallow the table. The floor is 112: enough for the roster's longest
+   * name, and no wider, because the date columns need every pixel it does not
+   * take — a clipped date field puts its calendar button over the text.
    */
   const peopleWidth = useMemo(() => {
     const longest = users.reduce((n, u) => Math.max(n, u.name.length), 0);
-    return Math.min(230, Math.max(120, 46 + Math.ceil(longest * 7.8)));
+    return Math.min(230, Math.max(112, 46 + Math.ceil(longest * 7.8)));
   }, [users]);
 
   const widthOf = useCallback(
@@ -1010,18 +1012,11 @@ const ROW_CONTROL =
   'dark:text-slate-100';
 
 const RowInput = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, type, onClick, ...props }, ref) => (
+  ({ className, type, ...props }, ref) => (
     <input
       ref={ref}
       type={type}
       className={cn(ROW_CONTROL, type === 'date' && 'row-date', className)}
-      onClick={(e) => {
-        // The calendar button is hidden to fit the column, so the field itself
-        // has to open the picker. Older browsers without showPicker keep the
-        // keyboard entry they always had.
-        if (type === 'date') (e.currentTarget as HTMLInputElement).showPicker?.();
-        onClick?.(e);
-      }}
       {...props}
     />
   ),

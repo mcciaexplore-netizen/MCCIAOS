@@ -10,3 +10,4 @@ dist-ssr
 server/data/*.json
 # Vercel CLI link metadata and the env file it pulls.
 .vercel
+backups/

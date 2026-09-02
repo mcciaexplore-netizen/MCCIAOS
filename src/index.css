@@ -145,13 +145,11 @@ body {
 }
 
 /* The new-task row's date fields.
-   Chrome sizes type="date" from "dd/mm/yyyy" plus a calendar button: 111px,
-   where the column has 86. The button is the 20px that does not fit, and it is
-   the part worth losing — the field calls showPicker() on click, so the whole
-   control opens the calendar instead of one small button at its edge. */
-.row-date::-webkit-calendar-picker-indicator {
-  display: none;
-}
+   The calendar button stays. An earlier version hid it to save 20px and called
+   showPicker() on click instead — which broke typing outright: the picker opens
+   on the very click that focuses the field and then swallows every keystroke,
+   so a date could not be entered by hand at all. The columns give up the width
+   instead. Only the internal padding is trimmed. */
 .row-date::-webkit-datetime-edit {
   padding: 0;
 }
