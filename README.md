@@ -163,6 +163,29 @@ Title's floor has to be the table's `minWidth` rather than the cell's, since a
 fixed layout ignores a cell's own minimum — otherwise a 1280px window crushed
 the one column carrying the actual sentence down to "Wh.".
 
+**Recorded work is read-only.** A field that already holds a value cannot be
+changed without the admin passcode, and neither can deleting a task. A field
+that is still empty stays editable — filling in a blank adds information, it
+does not revise a record, and making people unlock to enter a missing due date
+would only teach them to leave the app unlocked all day. Note that status and
+priority always hold a value, so every progress update needs the passcode; that
+is the intended trade and it is the main day-to-day cost of the freeze.
+
+The lock is one gate shared with the Settings page: unlocking either unlocks
+both, for the life of the tab. The toolbar shows **Locked** / **Unlocked** so
+the state is visible before somebody clicks a cell and finds it inert.
+
+It is enforced in the API, not only on screen — every edit carries the passcode
+in an `x-settings-passcode` header and `server/handlers.ts` refuses the ones
+that do not. A check that lived only in the browser would be a suggestion, and
+one PATCH from anywhere else would walk straight past it.
+
+**What this is not.** It is not authentication. This app has no login, everyone
+shares one passcode, and anyone holding it — or reading a tab's session storage
+— can change anything. It stops accidents and casual edits; it does not record
+who made a change, and it does not keep out anybody determined. See
+`src/lib/lock.ts`.
+
 **Adding work while viewing one person.** Filtered to somebody, the new row's
 Name is frozen to them — their avatar and name, no picker. A picker there could
 only ever file the task out of the view that was just asked for. Viewing

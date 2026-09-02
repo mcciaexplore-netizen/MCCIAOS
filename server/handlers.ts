@@ -66,6 +66,43 @@ import {
   type SheetName,
 } from './store.js';
 
+/** The one admin passcode. Never sent to the client; only ever compared here. */
+function adminPasscode(): string {
+  return process.env.SETTINGS_PASSCODE?.trim() || 'mccia1934';
+}
+
+/**
+ * Whether a request carries the admin passcode.
+ *
+ * Recorded work is frozen once it holds a value, and the freeze is enforced
+ * here rather than by hiding controls on the page: a check that lives only in
+ * the browser is a suggestion, and one PATCH sent from anywhere else would walk
+ * straight past it.
+ *
+ * This is a permission check, not a login. Everyone shares one passcode, so all
+ * it establishes is that whoever sent this knew it — never who they were.
+ */
+/** Task field names as they read in the refusal message. */
+function FIELD_LABELS(field: string): string {
+  const named: Record<string, string> = {
+    userId: 'The person',
+    title: 'The title',
+    priority: 'The priority',
+    status: 'The status',
+    allocationDate: 'The allocation date',
+    dueDate: 'The due date',
+    deadlineDate: 'The deadline',
+    reportTo: 'Reports to',
+    approverId: 'The approver',
+  };
+  return named[field] ?? field;
+}
+
+function holdsPasscode(req: ApiRequest): boolean {
+  const supplied = req.headers['x-settings-passcode'];
+  return typeof supplied === 'string' && supplied === adminPasscode();
+}
+
 export interface ApiRequest {
   method: string;
   pathname: string;
@@ -282,8 +319,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     if (method !== 'POST') return json(405, { error: 'Method not allowed' });
     const body = (req.body ?? {}) as { passcode?: unknown };
     const supplied = typeof body.passcode === 'string' ? body.passcode : '';
-    const expected = process.env.SETTINGS_PASSCODE?.trim() || 'mccia1934';
-    if (supplied !== expected) {
+    if (supplied !== adminPasscode()) {
       return json(401, { error: 'That passcode is not right' });
     }
     return json(200, { ok: true });
@@ -746,6 +782,31 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
         const parsed = taskUpdateSchema.safeParse(camelBody(req.body));
         if (!parsed.success)
           return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+
+        // A field that is already filled is frozen: overwriting what somebody
+        // recorded needs the passcode. A field that is still empty does not —
+        // filling in a blank adds information, it does not revise a record, and
+        // making people unlock to enter a missing due date would only teach
+        // them to leave the app unlocked.
+        if (!holdsPasscode(req)) {
+          const before = await getTask(id);
+          if (!before) return json(404, { error: 'Not found' });
+          const filled = Object.keys(parsed.data).filter((f) => {
+            const current = (before as unknown as Record<string, unknown>)[f];
+            return current !== null && current !== undefined && current !== '';
+          });
+          if (filled.length > 0) {
+            return json(403, {
+              error: `${filled.map(FIELD_LABELS).join(' and ')} ${
+                filled.length > 1 ? 'are' : 'is'
+              } already recorded. Unlock with the admin passcode to change ${
+                filled.length > 1 ? 'them' : 'it'
+              }.`,
+              locked: filled,
+            });
+          }
+        }
+
         const task = await updateTask(id, parsed.data, actor);
         if (!task) return json(404, { error: 'Not found' });
         // The full row goes back so the client can reconcile server-set fields
@@ -753,6 +814,13 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
         return json(200, { task });
       }
       if (method === 'DELETE') {
+        // Deleting is the largest edit there is; it always needs the passcode.
+        if (!holdsPasscode(req)) {
+          return json(403, {
+            error: 'Deleting recorded work needs the admin passcode.',
+            locked: ['task'],
+          });
+        }
         const ok = await deleteTask(id);
         if (!ok) return json(404, { error: 'Not found' });
         return json(200, { success: true });

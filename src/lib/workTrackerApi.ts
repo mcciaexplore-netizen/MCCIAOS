@@ -15,11 +15,30 @@ import type {
   UserInput,
   UserUpdateInput,
 } from '@/schemas/workTracker';
+import { unlockPasscode } from './lock';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, headers: JSON_HEADERS });
+/**
+ * Attaches the admin passcode when this tab holds it.
+ *
+ * Only the calls that revise or remove recorded work send it. A read has
+ * nothing to authorise, and putting the passcode on every request would spray
+ * it across logs and proxies for no benefit.
+ */
+function authHeaders(): Record<string, string> {
+  const passcode = unlockPasscode();
+  return passcode ? { 'x-settings-passcode': passcode } : {};
+}
+
+async function request<T>(
+  url: string,
+  init?: RequestInit & { authorised?: boolean },
+): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { ...JSON_HEADERS, ...(init?.authorised ? authHeaders() : {}) },
+  });
   const text = await res.text();
 
   let body: { error?: string } | null = null;
@@ -133,11 +152,15 @@ export const trackerApi = {
     return request<{ task: Task }>(`/api/tasks/${id}?${qs({ actor })}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
+      authorised: true,
     });
   },
 
   remove(id: string) {
-    return request<{ success: boolean }>(`/api/tasks/${id}`, { method: 'DELETE' });
+    return request<{ success: boolean }>(`/api/tasks/${id}`, {
+      method: 'DELETE',
+      authorised: true,
+    });
   },
 
   /** Approval is an action, not a status. Approver-only, completed work only. */

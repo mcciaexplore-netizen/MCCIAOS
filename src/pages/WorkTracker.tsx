@@ -9,6 +9,8 @@ import {
   ChevronDown,
   Columns3,
   Loader2,
+  Lock,
+  LockOpen,
   MoreHorizontal,
   Plus,
   Settings as SettingsIcon,
@@ -17,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
-import { Button, Card, EmptyState, ErrorState, Input, Select } from '@/components/ui';
+import { Button, Card, EmptyState, ErrorState, Input, Modal, Select } from '@/components/ui';
 import { SlideOver } from '@/components/SlideOver';
 import {
   Avatar,
@@ -37,6 +39,8 @@ import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
 } from '@/constants';
+import { useUnlocked } from '@/hooks/useUnlocked';
+import { lock as storeLock, unlock as storeUnlock } from '@/lib/lock';
 import { istToday } from '@/lib/ist';
 import { cn } from '@/lib/utils';
 import type { Task, TaskPriority, TaskStatus, User } from '@/types';
@@ -364,6 +368,8 @@ export default function WorkTracker() {
   const [showColumns, setShowColumns] = useState(false);
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
+  const unlocked = useUnlocked();
+  const [askPasscode, setAskPasscode] = useState(false);
   const [activityFor, setActivityFor] = useState<Task | null>(null);
 
   const anyFilter = Boolean(status || priority || tab !== 'all');
@@ -518,6 +524,7 @@ export default function WorkTracker() {
               Clear filters
             </Button>
           )}
+          <LockButton unlocked={unlocked} onAsk={() => setAskPasscode(true)} />
           {/* One control, doing both jobs: it narrows the table to one person
               and names who new work is filed under. Left on Everyone the table
               shows the whole team, which is what it opens on. */}
@@ -694,6 +701,7 @@ export default function WorkTracker() {
                       actor={actor}
                       actorName={actorName}
                       visible={visible}
+                      unlocked={unlocked}
                       savingCells={savingCells}
                       cellErrors={cellErrors}
                       onSave={save}
@@ -719,6 +727,7 @@ export default function WorkTracker() {
         )}
       </Card>
 
+      <PasscodePrompt open={askPasscode} onClose={() => setAskPasscode(false)} />
       <ActivityPanel task={activityFor} onClose={() => setActivityFor(null)} />
     </div>
   );
@@ -732,6 +741,7 @@ function TaskRow({
   actor,
   actorName,
   visible,
+  unlocked,
   savingCells,
   cellErrors,
   onSave,
@@ -744,6 +754,8 @@ function TaskRow({
   actor?: string;
   actorName?: string;
   visible: (k: ColumnKey) => boolean;
+  /** Whether this tab holds the admin passcode; frozen cells reopen when it does. */
+  unlocked: boolean;
   savingCells: Record<string, boolean>;
   cellErrors: Record<string, string>;
   onSave: (id: string, field: string, value: unknown) => void;
@@ -754,10 +766,33 @@ function TaskRow({
   const [menu, setMenu] = useState(false);
   useEscape(menu, () => setMenu(false));
   const k = (field: string) => `${task.id}:${field}`;
+
+  /**
+   * A field that already holds a value is read-only until the tab is unlocked.
+   * An empty one stays editable: filling in a blank adds information, it does
+   * not revise a record, and making people unlock to enter a missing due date
+   * would only teach them to leave the app unlocked all day.
+   *
+   * The same rule is enforced in the API. This half only decides what the
+   * screen offers; the server is what actually refuses.
+   */
+  const frozen = (field: string) => {
+    if (unlocked) return false;
+    const v = (task as unknown as Record<string, unknown>)[field];
+    return v !== null && v !== undefined && v !== '';
+  };
+
   const cell = (field: string) => ({
     saving: savingCells[k(field)],
     error: cellErrors[k(field)] ?? null,
+    disabled: frozen(field),
   });
+
+  /** Says why a cell will not open, on the element people actually hover. */
+  const td = (field: string) =>
+    frozen(field)
+      ? { title: 'Already recorded. Unlock with the admin passcode to change it.' }
+      : {};
 
   // Approval is enabled only on completed work, and only for its own approver.
   const isApprover = Boolean(actor && task.approverId && actor === task.approverId);
@@ -774,7 +809,7 @@ function TaskRow({
   return (
     <tr className="group" style={{ background: 'var(--n0)' }}>
       {visible('name') && (
-        <td className="sticky z-10" style={{ left: 0, background: 'inherit' }}>
+        <td className="sticky z-10" style={{ left: 0, background: 'inherit' }} {...td('userId')}>
           <UserCell
             value={task.userId}
             users={users}
@@ -787,7 +822,7 @@ function TaskRow({
       )}
 
       {visible('title') && (
-        <td>
+        <td {...td('title')}>
           <EditableText
             value={task.title}
             onSave={(v) => onSave(task.id, 'title', v)}
@@ -797,7 +832,7 @@ function TaskRow({
       )}
 
       {visible('priority') && (
-        <td>
+        <td {...td('priority')}>
           <IconSelect<TaskPriority>
             value={task.priority}
             options={TASK_PRIORITIES}
@@ -812,7 +847,7 @@ function TaskRow({
       )}
 
       {visible('status') && (
-        <td>
+        <td {...td('status')}>
           <IconSelect<TaskStatus>
             value={task.status}
             options={TASK_STATUSES}
@@ -831,7 +866,7 @@ function TaskRow({
       )}
 
       {visible('allocation') && (
-        <td>
+        <td {...td('allocationDate')}>
           <EditableDate
             value={task.allocationDate}
             ariaLabel={`Allocation date of ${task.title}`}
@@ -842,7 +877,7 @@ function TaskRow({
       )}
 
       {visible('due') && (
-        <td>
+        <td {...td('dueDate')}>
           <EditableDate
             value={task.dueDate}
             // Red only when there is no deadline behind it, because then the
@@ -857,7 +892,7 @@ function TaskRow({
       )}
 
       {visible('deadline') && (
-        <td>
+        <td {...td('deadlineDate')}>
           <EditableDate
             value={task.deadlineDate}
             min={task.dueDate ?? undefined}
@@ -871,7 +906,7 @@ function TaskRow({
       )}
 
       {visible('reportTo') && (
-        <td>
+        <td {...td('reportTo')}>
           <UserCell
             value={task.reportTo}
             users={users}
@@ -883,7 +918,7 @@ function TaskRow({
       )}
 
       {visible('approver') && (
-        <td>
+        <td {...td('approverId')}>
           <UserCell
             value={task.approverId}
             users={users}
@@ -935,13 +970,17 @@ function TaskRow({
               >
                 View activity
               </button>
+              {/* Deleting is the largest edit there is, so it needs the
+                  passcode whatever state the individual fields are in. */}
               <button
                 onClick={() => {
                   setMenu(false);
                   onDelete();
                 }}
-                style={{ color: 'var(--r400)' }}
-                className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[color:var(--n20)]"
+                disabled={!unlocked}
+                title={unlocked ? undefined : 'Unlock with the admin passcode to delete'}
+                style={{ color: unlocked ? 'var(--r400)' : 'var(--n200)' }}
+                className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[color:var(--n20)] disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
                 Delete
               </button>
@@ -997,6 +1036,92 @@ RowInput.displayName = 'RowInput';
  */
 function RowSelect({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className={cn(ROW_CONTROL, 'row-select', className)} {...props} />;
+}
+
+/**
+ * Shows whether recorded work can be changed, and is the way to change that.
+ *
+ * Deliberately a plain toggle rather than a hidden gesture: people need to see
+ * that the table is read-only before they try to edit a cell and find it inert.
+ */
+function LockButton({ unlocked, onAsk }: { unlocked: boolean; onAsk: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => (unlocked ? storeLock() : onAsk())}
+      title={
+        unlocked
+          ? 'Recorded work can be edited. Click to lock again.'
+          : 'Recorded work is read-only. Click to unlock with the admin passcode.'
+      }
+      className={unlocked ? 'text-amber-600 dark:text-amber-400' : undefined}
+    >
+      {unlocked ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+      {unlocked ? 'Unlocked' : 'Locked'}
+    </Button>
+  );
+}
+
+/**
+ * Asks for the admin passcode, checked server-side so the value is never in the
+ * bundle. On success the tab holds it until it closes, and every edit presents
+ * it — see src/lib/lock.ts for what that does and does not amount to.
+ */
+function PasscodePrompt({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [passcode, setPasscode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setPasscode('');
+      setError(null);
+    }
+  }, [open]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passcode.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await trackerApi.unlockSettings(passcode);
+      storeUnlock(passcode);
+      onClose();
+    } catch (err) {
+      setError((err as Error).message || 'That passcode is not right');
+      setPasscode('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="md"
+      title="Unlock to edit"
+      description="Work that has already been recorded is read-only. The admin passcode reopens it for this tab."
+    >
+      <form onSubmit={submit}>
+        <Input
+          type="password"
+          autoFocus
+          value={passcode}
+          onChange={(e) => setPasscode(e.target.value)}
+          placeholder="Passcode"
+          aria-label="Admin passcode"
+        />
+        {error && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
+        <Button type="submit" className="mt-3 w-full" disabled={busy || !passcode.trim()}>
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          Unlock
+        </Button>
+      </form>
+    </Modal>
+  );
 }
 
 function NewTaskRow({

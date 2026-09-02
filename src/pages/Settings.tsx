@@ -32,6 +32,7 @@ import { useToast } from '@/components/Toast';
 import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
 import { api } from '@/lib/api';
+import { unlock as storeUnlock } from '@/lib/lock';
 import { trackerApi } from '@/lib/workTrackerApi';
 import type { UserInput, UserUpdateInput } from '@/schemas/workTracker';
 import { cn } from '@/lib/utils';
@@ -144,11 +145,9 @@ function PasscodeGate({ onUnlock }: { onUnlock: () => void }) {
     setError(null);
     try {
       await trackerApi.unlockSettings(passcode);
-      try {
-        sessionStorage.setItem(UNLOCK_KEY, 'true');
-      } catch {
-        /* private mode; the unlock just will not survive a reload */
-      }
+      // Shared with the Work Tracker: unlocking here also unfreezes recorded
+      // work, because it is the same permission and the same passcode.
+      storeUnlock(passcode);
       onUnlock();
     } catch (err) {
       setError((err as Error).message || 'That passcode is not right');
