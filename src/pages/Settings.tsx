@@ -233,18 +233,6 @@ function AdminGate({ children }: { children: ReactNode }) {
           </p>
         </div>
 
-        {session.warning && (
-          <p
-            className={
-              session.warning.level === 'severe'
-                ? 'mb-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                : 'mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-            }
-          >
-            {session.warning.message}
-          </p>
-        )}
-
         {!serverHasNoPassword && (
           <form onSubmit={submit}>
             <label htmlFor="admin-password" className="sr-only">
