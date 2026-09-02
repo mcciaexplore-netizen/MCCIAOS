@@ -41,7 +41,7 @@ import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
 } from '@/constants';
-import { useAdminSession } from '@/hooks/useAdminSession';
+import { useEditLock } from '@/hooks/useEditLock';
 import { istToday } from '@/lib/ist';
 import { cn } from '@/lib/utils';
 import type { Task, TaskPriority, TaskStatus, User } from '@/types';
@@ -415,7 +415,7 @@ export default function WorkTracker() {
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
   const [addingConsultation, setAddingConsultation] = useState(false);
-  const { authenticated: unlocked } = useAdminSession();
+  const { unlocked } = useEditLock();
   const [activityFor, setActivityFor] = useState<Task | null>(null);
 
   const anyFilter = Boolean(status || priority || tab !== 'all');
@@ -1152,7 +1152,7 @@ function LockStatus({ unlocked }: { unlocked: boolean }) {
       to="/settings?tab=work-tracker"
       title={
         unlocked
-          ? 'Recorded work can be edited. Lock it again in Settings.'
+          ? 'Recorded work can be edited. Lock it in Settings.'
           : 'Recorded work is read-only. Unlock it in Settings.'
       }
       className={cn(

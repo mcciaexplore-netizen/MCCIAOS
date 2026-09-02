@@ -42,8 +42,7 @@ import { useToast } from '@/components/Toast';
 import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
 import { api } from '@/lib/api';
-import { login, logout } from '@/lib/adminSession';
-import { useAdminSession } from '@/hooks/useAdminSession';
+import { useEditLock } from '@/hooks/useEditLock';
 import { trackerApi } from '@/lib/workTrackerApi';
 import type { UserInput, UserUpdateInput } from '@/schemas/workTracker';
 import { cn } from '@/lib/utils';
@@ -159,161 +158,9 @@ const GROUPS: Group[] = [
   },
 ];
 
-/**
- * Admin gate.
- *
- * This app has no user accounts — no login, no roles, no user table beyond a
- * roster of names that fills dropdowns. So "admin" is not a role somebody
- * holds; it is a password somebody knows, and everyone is anonymous until they
- * present it. There is nobody to hide the Settings link *from*.
- *
- * The gate is not the protection. Every endpoint Settings writes through checks
- * the session server-side and refuses without it, so hiding this screen is a
- * courtesy to the person who should not be here, not a boundary.
- */
-function AdminGate({ children }: { children: ReactNode }) {
-  const session = useAdminSession();
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await login(password);
-      setPassword('');
-    } catch (err) {
-      setError((err as Error).message || 'That password is not right');
-      setPassword('');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Nothing is known on first paint. Showing a denial here would flash one at
-  // the very person entitled to be here.
-  if (session.checking) {
-    return (
-      <div>
-        <PageHeader title="Settings" subtitle="Checking your access…" />
-        <Card className="mx-auto max-w-sm p-6">
-          <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            One moment
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (session.authenticated) return <>{children}</>;
-
-  const serverHasNoPassword = !session.configured;
-
-  return (
-    <div>
-      <PageHeader title="Settings" subtitle="Administrators only." />
-      <Card className="mx-auto max-w-sm p-6">
-        <div className="mb-4 flex flex-col items-center text-center">
-          <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
-            <Lock className="h-5 w-5" />
-          </span>
-          <h2 className="text-sm font-medium text-slate-700 dark:text-slate-200">
-            {serverHasNoPassword ? 'Settings is not configured' : 'Administrator sign-in'}
-          </h2>
-          <p className="mt-1 text-xs text-slate-400">
-            {serverHasNoPassword
-              ? 'The server has no admin password loaded. If it is already in .env, restart the dev server — the file is read at startup. On a deployment, set ADMIN_SETTINGS_PASSWORD and redeploy.'
-              : session.reason === 'expired'
-                ? 'Your session ended. Sign in again to continue.'
-                : 'Settings changes the roster and the values the whole app uses.'}
-          </p>
-        </div>
-
-        {!serverHasNoPassword && (
-          <form onSubmit={submit}>
-            <label htmlFor="admin-password" className="sr-only">
-              Administrator password
-            </label>
-            <Input
-              id="admin-password"
-              type="password"
-              autoFocus
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
-              aria-label="Administrator password"
-              aria-invalid={Boolean(error)}
-              aria-describedby={error ? 'admin-password-error' : undefined}
-            />
-            {error && (
-              <p
-                id="admin-password-error"
-                role="alert"
-                className="mt-2 text-xs text-rose-600 dark:text-rose-400"
-              >
-                {error}
-              </p>
-            )}
-            <Button type="submit" className="mt-3 w-full" disabled={busy || !password.trim()}>
-              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              Sign in
-            </Button>
-          </form>
-        )}
-      </Card>
-    </div>
-  );
-}
-
+/** Settings opens directly. The password gate was removed by request. */
 export default function Settings() {
-  return (
-    <AdminGate>
-      <SettingsInner />
-    </AdminGate>
-  );
-}
-
-/**
- * Says whose session this is and ends it.
- *
- * Signing out is not decoration: the session is a cookie with hours left on it,
- * and on a shared machine walking away without a way to end it is the whole
- * problem.
- */
-function SessionBar() {
-  const session = useAdminSession();
-  const { toast } = useToast();
-  if (!session.authenticated) return null;
-
-  const minutes = session.expiresAt
-    ? Math.max(0, Math.round((session.expiresAt - Date.now()) / 60000))
-    : null;
-
-  return (
-    <span className="flex items-center gap-2">
-      <span className="hidden text-xs text-slate-400 sm:inline">
-        {minutes !== null && minutes < 60
-          ? `Session ends in ${minutes} min`
-          : 'Signed in as administrator'}
-      </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={async () => {
-          await logout();
-          toast('Signed out');
-        }}
-      >
-        <LogOut className="h-4 w-4" />
-        Sign out
-      </Button>
-    </span>
-  );
+  return <SettingsInner />;
 }
 
 function SettingsInner() {
@@ -392,7 +239,6 @@ function SettingsInner() {
         subtitle="Organisation details, the team roster, and the values the rest of the app reads."
         actions={
           <>
-            <SessionBar />
             <Button
               variant="secondary"
               size="sm"
@@ -818,7 +664,7 @@ function TonedListEditor({
 function WorkTrackerAdmin() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { authenticated: unlocked } = useAdminSession();
+  const { unlocked, setUnlocked } = useEditLock();
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const usersQuery = useQuery({
@@ -886,7 +732,7 @@ function WorkTrackerAdmin() {
 
   return (
     <div className="space-y-4">
-      {/* ---- the lock ---- */}
+      {/* ---- the edit lock ---- */}
       <Card className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -899,27 +745,21 @@ function WorkTrackerAdmin() {
                 : 'Locked. A field that already holds a value is read-only, and tasks cannot be deleted.'}
             </p>
             <p className="mt-2 text-xs text-slate-400">
-              Reaching this page unlocked editing, because it is the same passcode.
-              Lock it again when you are done.
+              A guard against accidents, not a permission check — anyone using the
+              app can switch it, and it applies to this browser only.
             </p>
           </div>
           <Button
             variant={unlocked ? 'secondary' : 'primary'}
             size="sm"
             onClick={() => {
-              if (unlocked) {
-                // Locking recorded work now means ending the admin session, so
-                // it is the same act as signing out — one state, not two that
-                // could disagree.
-                void logout();
-                toast('Signed out. Recorded work is locked again.');
-              }
+              setUnlocked(!unlocked);
+              toast(unlocked ? 'Recorded work is locked' : 'Recorded work can be edited');
             }}
-            disabled={!unlocked}
             className="shrink-0"
           >
             {unlocked ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-            {unlocked ? 'Lock again' : 'Locked'}
+            {unlocked ? 'Lock' : 'Unlock'}
           </Button>
         </div>
       </Card>
@@ -996,12 +836,6 @@ function WorkTrackerAdmin() {
           {total} task{total === 1 ? '' : 's'} across the team.
         </p>
 
-        {!unlocked && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-            Locked. Unlock above before clearing anybody&rsquo;s work.
-          </p>
-        )}
-
         <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
           {users.map((u) => {
             const n = counts[u.id] ?? 0;
@@ -1033,7 +867,7 @@ function WorkTrackerAdmin() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    disabled={!unlocked || n === 0}
+                    disabled={n === 0}
                     onClick={() => setConfirming(u.id)}
                     title={
                       n === 0
