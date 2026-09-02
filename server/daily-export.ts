@@ -13,6 +13,7 @@
  */
 import { listTasks, listUsers } from './work-tracker.js';
 import { openSheet, sheetsConfig, SheetsError } from './google-sheets.js';
+import { istDate } from '../src/lib/ist.js';
 import type { Task } from '../src/types/index.js';
 
 /** The columns written to each person's tab, in order. */
@@ -25,23 +26,10 @@ const HEADER = [
   'Due',
   'Deadline',
   'Percentage',
-  'Consults allocated',
-  'Consults done',
-  'Callings done',
   'Reports to',
   'Approver',
   'Late',
 ] as const;
-
-/** IST calendar day, matching how the rest of the app decides what "today" is. */
-export function istDate(now = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
-}
 
 function row(day: string, t: Task): (string | number | null)[] {
   return [
@@ -52,12 +40,9 @@ function row(day: string, t: Task): (string | number | null)[] {
     t.allocationDate ?? '',
     t.dueDate ?? '',
     t.deadlineDate ?? '',
-    // Empty rather than 0: a task that says nothing about consultations should
-    // keep saying nothing once it reaches the sheet.
+    // Empty rather than 0: a task nobody has put a figure on should keep
+    // saying nothing once it reaches the sheet.
     t.percentage ?? '',
-    t.consultationsAllocated ?? '',
-    t.consultationsDone ?? '',
-    t.callingsDone ?? '',
     t.reportToName ?? '',
     t.approverName ?? '',
     t.isOverdue ? 'LATE' : '',

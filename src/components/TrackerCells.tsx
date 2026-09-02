@@ -386,6 +386,72 @@ export function EditableNumber({
   );
 }
 
+/**
+ * A time-of-day cell, HH:MM on a 24-hour clock.
+ *
+ * Same shape as EditableDate: plain text until clicked, so a dense row is not a
+ * wall of native time widgets. No timezone — "11:30" means 11:30 on the team's
+ * own clock, and storing an offset would invite the question of whose.
+ */
+export function EditableTime({
+  value,
+  onSave,
+  saving,
+  error,
+  disabled,
+  ariaLabel,
+}: CellProps & {
+  value: string | null;
+  onSave: (next: string | null) => void;
+  ariaLabel: string;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <CellShell saving={saving} error={error}>
+        <input
+          type="time"
+          autoFocus
+          defaultValue={value ?? ''}
+          data-cell
+          aria-label={ariaLabel}
+          onChange={(e) => {
+            onSave(e.target.value === '' ? null : e.target.value);
+            setEditing(false);
+          }}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setEditing(false);
+            }
+          }}
+          className={cn(cellBase, 'tabular-nums')}
+        />
+      </CellShell>
+    );
+  }
+
+  return (
+    <CellShell saving={saving} error={error}>
+      <button
+        data-cell
+        disabled={disabled}
+        aria-label={ariaLabel}
+        onClick={() => setEditing(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') setEditing(true);
+        }}
+        style={{ color: 'var(--n200)' }}
+        className={cn(cellBase, 'tabular-nums')}
+      >
+        {value ?? '—'}
+      </button>
+    </CellShell>
+  );
+}
+
 // ---- Icon-fronted select --------------------------------------------------
 
 /**

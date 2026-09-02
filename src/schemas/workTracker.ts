@@ -56,9 +56,6 @@ const taskFields = z.object({
   reportTo: uuid.nullable().optional(),
   approverId: uuid.nullable().optional(),
   percentage: percent,
-  consultationsAllocated: count,
-  consultationsDone: count,
-  callingsDone: count,
 });
 
 type TaskFields = Partial<z.infer<typeof taskFields>>;
@@ -108,3 +105,25 @@ export type TaskInput = z.infer<typeof taskSchema>;
 export type TaskUpdateInput = z.infer<typeof taskUpdateSchema>;
 export type UserInput = z.infer<typeof userSchema>;
 export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
+
+// ---- Consultations ---------------------------------------------------------
+// Their own records, not three columns on every task. Deliberately not gated by
+// the admin passcode — see db/consultations.sql.
+
+const consultationFields = z.object({
+  title: z.string().trim().min(1, 'Give the consultation a name'),
+  userId: uuid,
+  heldOn: nullableDate,
+  heldAt: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a 24-hour HH:MM time')
+    .nullable()
+    .optional(),
+  allocated: count,
+  completed: count,
+});
+
+export const consultationSchema = consultationFields;
+export const consultationUpdateSchema = consultationFields.partial();
+export type ConsultationInput = z.infer<typeof consultationSchema>;
+export type ConsultationUpdateInput = z.infer<typeof consultationUpdateSchema>;

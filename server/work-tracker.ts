@@ -83,9 +83,6 @@ interface TaskRow {
   priority: string;
   status: string;
   percentage: number | null;
-  consultations_allocated: number | null;
-  consultations_done: number | null;
-  callings_done: number | null;
   allocation_date: string | null;
   due_date: string | null;
   deadline_date: string | null;
@@ -109,9 +106,6 @@ interface TaskRow {
 const TASK_COLUMNS = `
   t.id, t.user_id, uo.name as user_name, t.title, t.priority, t.status,
   t.percentage,
-  t.consultations_allocated,
-  t.consultations_done,
-  t.callings_done,
   to_char(t.allocation_date, 'YYYY-MM-DD') as allocation_date,
   to_char(t.due_date,        'YYYY-MM-DD') as due_date,
   to_char(t.deadline_date,   'YYYY-MM-DD') as deadline_date,
@@ -146,9 +140,6 @@ function toTask(row: TaskRow): Task {
     priority: row.priority as TaskPriority,
     status: row.status as TaskStatus,
     percentage: row.percentage,
-    consultationsAllocated: row.consultations_allocated,
-    consultationsDone: row.consultations_done,
-    callingsDone: row.callings_done,
     allocationDate: row.allocation_date,
     dueDate: row.due_date,
     deadlineDate: row.deadline_date,
@@ -410,9 +401,6 @@ export interface TaskWriteInput {
   reportTo?: string | null;
   approverId?: string | null;
   percentage?: number | null;
-  consultationsAllocated?: number | null;
-  consultationsDone?: number | null;
-  callingsDone?: number | null;
 }
 
 async function recordActivity(
@@ -458,12 +446,9 @@ export async function createTask(
   const rows = (await db.query(
     `insert into tasks
        (user_id, title, priority, status, allocation_date, due_date,
-        deadline_date, report_to, approver_id, percentage,
-        consultations_allocated, consultations_done, callings_done,
-        completed_at)
+        deadline_date, report_to, approver_id, percentage, completed_at)
      values ($1::uuid, $2, $3, $4, coalesce($5::date, ${TODAY}), $6::date,
              $7::date, $8::uuid, $9::uuid, $10::smallint,
-             $11::int, $12::int, $13::int,
              case when $4 = 'completed' then now() end)
      returning id`,
     [
@@ -477,9 +462,6 @@ export async function createTask(
       input.reportTo ?? null,
       input.approverId ?? null,
       input.percentage ?? null,
-      input.consultationsAllocated ?? null,
-      input.consultationsDone ?? null,
-      input.callingsDone ?? null,
     ],
   )) as { id: string }[];
 
@@ -503,9 +485,6 @@ const PATCHABLE: Record<string, string> = {
   reportTo: 'report_to',
   approverId: 'approver_id',
   percentage: 'percentage',
-  consultationsAllocated: 'consultations_allocated',
-  consultationsDone: 'consultations_done',
-  callingsDone: 'callings_done',
 };
 
 const CASTS: Record<string, string> = {
@@ -516,9 +495,6 @@ const CASTS: Record<string, string> = {
   due_date: '::date',
   deadline_date: '::date',
   percentage: '::smallint',
-  consultations_allocated: '::int',
-  consultations_done: '::int',
-  callings_done: '::int',
 };
 
 export type TaskPatch = Partial<TaskWriteInput>;

@@ -226,14 +226,13 @@ export interface Task {
   deadlineDate: string | null;
 
   /**
-   * The four numbers a task carries. All nullable: a task with nothing to do
-   * with consultations should say nothing about them, and "none yet" (0) is a
-   * different statement from "not applicable" (null).
+   * How far along the work is, 0-100. Null means nobody has said.
+   *
+   * The consultation figures that used to sit beside this moved to their own
+   * table (db/consultations.sql): they were three permanently blank columns on
+   * every task that had nothing to do with consultations.
    */
   percentage: number | null;
-  consultationsAllocated: number | null;
-  consultationsDone: number | null;
-  callingsDone: number | null;
 
   reportTo: string | null;
   reportToName: string | null;
@@ -291,4 +290,29 @@ export interface AtRiskTask {
   title: string;
   userName: string;
   deadlineDate: string;
+}
+
+/**
+ * A consultation. Its own record rather than three columns on a task, with its
+ * own owner, date and time.
+ *
+ * Nothing here is gated by the admin passcode, unlike a task: these are running
+ * tallies the person who took them updates through the day.
+ */
+export interface Consultation {
+  id: string;
+  /** What the consultation was. Free text, named by whoever ran it. */
+  title: string;
+  /** Who took it. */
+  userId: string;
+  userName: string;
+  /** YYYY-MM-DD. */
+  heldOn: string | null;
+  /** HH:MM, 24-hour, no timezone — the team's own clock. */
+  heldAt: string | null;
+  /** Nullable rather than 0: "not applicable" is not "none yet". */
+  allocated: number | null;
+  completed: number | null;
+  createdAt: string;
+  updatedAt: string;
 }

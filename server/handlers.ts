@@ -16,6 +16,8 @@ import {
   TASK_STATUSES,
   taskSchema,
   taskUpdateSchema,
+  consultationSchema,
+  consultationUpdateSchema,
   userSchema,
   userUpdateSchema,
 } from '../src/schemas/workTracker.js';
@@ -33,6 +35,14 @@ import {
   restoreTasksForUser,
   taskCountsByUser,
 } from './work-tracker.js';
+import {
+  ConsultationError,
+  createConsultation,
+  deleteConsultation,
+  listConsultations,
+  restoreConsultation,
+  updateConsultation,
+} from './consultations.js';
 import { runDailyExport } from './daily-export.js';
 import { SheetsError } from './google-sheets.js';
 import {
@@ -75,9 +85,28 @@ import {
 } from './store.js';
 
 /** The one admin passcode. Never sent to the client; only ever compared here. */
-function adminPasscode(): string {
-  return process.env.SETTINGS_PASSCODE?.trim() || 'mccia1934';
+/**
+ * Returns null when no passcode is configured and this environment refuses to
+ * invent one — which is every deployed environment.
+ *
+ * The development fallback exists so the app runs with no setup at all. It must
+ * never apply in production: a deploy that forgets SETTINGS_PASSCODE would
+ * otherwise keep accepting a passcode that is sitting in this repository, and
+ * it would do it silently, looking for all the world like the new passcode had
+ * been applied. Refusing outright is louder and safer than quietly accepting a
+ * known one.
+ */
+function adminPasscode(): string | null {
+  const configured = process.env.SETTINGS_PASSCODE?.trim();
+  if (configured) return configured;
+
+  const deployed =
+    Boolean(process.env.VERCEL) || process.env.NODE_ENV === 'production';
+  return deployed ? null : DEV_PASSCODE;
 }
+
+/** Local-only convenience so `npm run dev` needs no configuration. */
+const DEV_PASSCODE = 'mccia1934';
 
 /**
  * Whether a request carries the admin passcode.
@@ -107,8 +136,10 @@ function FIELD_LABELS(field: string): string {
 }
 
 function holdsPasscode(req: ApiRequest): boolean {
+  const expected = adminPasscode();
+  if (!expected) return false;
   const supplied = req.headers['x-settings-passcode'];
-  return typeof supplied === 'string' && supplied === adminPasscode();
+  return typeof supplied === 'string' && supplied === expected;
 }
 
 export interface ApiRequest {
@@ -327,7 +358,17 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     if (method !== 'POST') return json(405, { error: 'Method not allowed' });
     const body = (req.body ?? {}) as { passcode?: unknown };
     const supplied = typeof body.passcode === 'string' ? body.passcode : '';
-    if (supplied !== adminPasscode()) {
+    const expected = adminPasscode();
+    if (!expected) {
+      // Nothing to check against. Say so plainly rather than rejecting every
+      // passcode as wrong, which would send somebody hunting for a typo that
+      // is not there.
+      return json(503, {
+        error:
+          'No admin passcode is configured on the server. Set SETTINGS_PASSCODE in the deployment environment and redeploy.',
+      });
+    }
+    if (supplied !== expected) {
       return json(401, { error: 'That passcode is not right' });
     }
     return json(200, { ok: true });
@@ -344,6 +385,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     pathname.startsWith('/api/tasks') ||
     pathname.startsWith('/api/users') ||
     pathname === '/api/task-counts' ||
+    pathname.startsWith('/api/consultations') ||
     pathname === '/api/export/daily' ||
     pathname === '/api/summary' ||
     pathname === '/api/today' ||
@@ -833,6 +875,52 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
       }
     }
 
+    // ---- /api/consultations ------------------------------------------------
+    // NOT passcode-gated, unlike tasks. These are running tallies the person
+    // who took the consultation updates through the day; asking for a passcode
+    // to correct a count would only teach everyone to leave the app unlocked.
+    if (pathname === '/api/consultations') {
+      if (method === 'GET') {
+        return json(200, {
+          consultations: await listConsultations({ user: query.get('user') }),
+        });
+      }
+      if (method === 'POST') {
+        const parsed = consultationSchema.safeParse(camelBody(req.body));
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        return json(201, { consultation: await createConsultation(parsed.data) });
+      }
+      return json(405, { error: 'Method not allowed' });
+    }
+
+    const consultMatch = pathname.match(
+      /^\/api\/consultations\/([^/]+)(?:\/(restore))?$/,
+    );
+    if (consultMatch) {
+      const [, id, sub] = consultMatch;
+      if (sub === 'restore') {
+        if (method !== 'POST') return json(405, { error: 'Method not allowed' });
+        const back = await restoreConsultation(id);
+        if (!back) return json(404, { error: 'Not found, or it was never removed' });
+        return json(200, { consultation: back });
+      }
+      if (method === 'PATCH') {
+        const parsed = consultationUpdateSchema.safeParse(camelBody(req.body));
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        const updated = await updateConsultation(id, parsed.data);
+        if (!updated) return json(404, { error: 'Not found' });
+        return json(200, { consultation: updated });
+      }
+      if (method === 'DELETE') {
+        const ok = await deleteConsultation(id);
+        if (!ok) return json(404, { error: 'Not found' });
+        return json(200, { success: true });
+      }
+      return json(405, { error: 'Method not allowed' });
+    }
+
     // ---- /api/task-counts --------------------------------------------------
     // Live task count per person, for the Settings roster.
     if (pathname === '/api/task-counts') {
@@ -926,6 +1014,7 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     return json(404, { error: 'Not found' });
   } catch (err) {
     if (err instanceof TrackerError) return json(err.status, { error: err.message });
+    if (err instanceof ConsultationError) return json(err.status, { error: err.message });
     return moduleFailure(err, 'Work Tracker', 'db/work-tracker.sql');
   }
 }

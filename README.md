@@ -163,15 +163,30 @@ Title's floor has to be the table's `minWidth` rather than the cell's, since a
 fixed layout ignores a cell's own minimum — otherwise a 1280px window crushed
 the one column carrying the actual sentence down to "Wh.".
 
-**The four numbers.** Alongside the dates each task carries `percentage`
-(0-100), `consultations_allocated`, `consultations_done` and `callings_done`.
-All four are nullable, and that is the point: a task with nothing to do with
-consultations should say nothing about them, which is a different statement from
-"none yet" (0). Percentage is held to 0-100 and the counts to non-negative in
-Postgres; `consultations_done` is deliberately **not** capped by `allocated`,
-because doing more than was formally handed out is a normal thing to record and
-a CHECK that rejects the truth teaches people to enter something false.
-Migration: `db/work-tracker-metrics.sql`.
+**Percentage.** Tasks carry `percentage` (0-100, nullable — null means nobody
+has said). It is the only number left on a task: `consultations_allocated`,
+`consultations_done` and `callings_done` were dropped, because they stood empty
+on every piece of work that was not a consultation, taking width the actual work
+needed. Migrations: `db/work-tracker-metrics.sql`, then `db/consultations.sql`
+which retires three of the four.
+
+## Consultations
+
+Their own table and their own view, reached by **Add Consultation** beside New
+task on the Work Tracker. A consultation records what it was, who took it, the
+date, the time, how many were allocated and how many were completed.
+
+**Not frozen.** Unlike a task, nothing here is gated by the admin passcode —
+not editing a filled field, not deleting. These are running tallies the person
+who took them updates through the day, and making them find the passcode to
+correct a count would only teach everyone to leave the app unlocked. Removal
+still hides rather than destroys (`consultations.deleted_at`), so a mis-click is
+undoable from the toast.
+
+`completed` is deliberately **not** capped by `allocated`: taking more than were
+formally allocated is a normal thing to record, and a CHECK that rejects the
+truth teaches people to enter something false. Both are nullable, because "not
+applicable" is a different statement from "none yet" (0).
 
 **Recorded work is read-only.** A field that already holds a value cannot be
 changed without the admin passcode, and neither can deleting a task. A field
@@ -432,3 +447,21 @@ three endpoints. `server/daily-export.ts` builds the rows.
 
 Nothing here is required: with none of the variables set the app runs exactly as
 before, and the endpoint answers 501 explaining what is missing.
+
+
+## Changing the admin passcode
+
+Set `SETTINGS_PASSCODE` in the deployment environment and redeploy. It gates the
+Settings page, every edit to already-recorded work, deleting, the per-person
+bulk clear, and the manual export run — so changing it changes all of them at
+once, and the previous passcode stops working immediately.
+
+**It is required in production.** With `SETTINGS_PASSCODE` unset, a deployed
+instance refuses every unlock with a 503 naming the variable, rather than
+falling back to a default. The fallback exists only so `npm run dev` needs no
+configuration; letting it apply to a deploy would mean a forgotten environment
+variable silently kept accepting a passcode that is sitting in this repository,
+while looking exactly as though the new one had taken effect.
+
+A passcode that has ever been committed should be treated as public. Pick a new
+one rather than reusing anything from this repo's history.

@@ -32,6 +32,7 @@ import {
   UserCell,
   formatJiraDate,
 } from '@/components/TrackerCells';
+import { ConsultationsTable } from '@/components/ConsultationsTable';
 import { useToast } from '@/components/Toast';
 import { trackerApi, type TabKey } from '@/lib/workTrackerApi';
 import {
@@ -76,9 +77,6 @@ const COLUMNS = [
   { key: 'due', label: 'Due', width: 130, sticky: false, flex: false, sort: 'due' },
   { key: 'deadline', label: 'Deadline', width: 130, sticky: false, flex: false, sort: 'deadline' },
   { key: 'percentage', label: 'Percentage', width: 92, sticky: false, flex: false, sort: '' },
-  { key: 'consultsAllocated', label: 'Consults allocated', width: 132, sticky: false, flex: false, sort: '' },
-  { key: 'consultsDone', label: 'Consults done', width: 110, sticky: false, flex: false, sort: '' },
-  { key: 'callingsDone', label: 'Callings done', width: 110, sticky: false, flex: false, sort: '' },
   { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
   { key: 'approver', label: 'Approver', width: 132, sticky: false, flex: false, sort: '' },
 ] as const;
@@ -133,6 +131,12 @@ function useTrackerParams() {
   const priority = params.get('priority') ?? '';
   const sort = params.get('sort') ?? '';
   const dir = (params.get('dir') ?? 'asc') as 'asc' | 'desc';
+  /**
+   * Which table is on screen. In the URL like everything else here, so a link
+   * to the consultations view is shareable and survives a refresh.
+   */
+  const view: 'work' | 'consultations' =
+    params.get('view') === 'consultations' ? 'consultations' : 'work';
 
   const set = useCallback(
     (next: Record<string, string>) => {
@@ -162,11 +166,12 @@ function useTrackerParams() {
     [params, setParams],
   );
 
-  return { tab, user, status, priority, sort, dir, set, setUser, urlHasUser: params.has('user') };
+  return { tab, user, status, priority, sort, dir, view, set, setUser, urlHasUser: params.has('user') };
 }
 
 export default function WorkTracker() {
-  const { tab, user, status, priority, sort, dir, set, setUser, urlHasUser } = useTrackerParams();
+  const { tab, user, status, priority, sort, dir, view, set, setUser, urlHasUser } =
+    useTrackerParams();
   const qc = useQueryClient();
   const { toast } = useToast();
 
@@ -390,6 +395,7 @@ export default function WorkTracker() {
   const [showColumns, setShowColumns] = useState(false);
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
+  const [addingConsultation, setAddingConsultation] = useState(false);
   const unlocked = useUnlocked();
   const [activityFor, setActivityFor] = useState<Task | null>(null);
 
@@ -491,7 +497,13 @@ export default function WorkTracker() {
           at-risk is the chip below. */}
       <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="inline-flex gap-1 rounded-full bg-slate-100 p-1 dark:bg-slate-800">
-          {TABS.filter((t) => t.key !== 'assigned_to_me' || user).map((t) => {
+          {view === 'consultations' ? (
+            <ViewSwitch onBack={() => set({ view: '' })} />
+          ) : (
+            <></>
+          )}
+          {view === 'work' &&
+            TABS.filter((t) => t.key !== 'assigned_to_me' || user).map((t) => {
             const n = counts.data?.[t.key];
             const active = tab === t.key;
             return (
@@ -521,7 +533,7 @@ export default function WorkTracker() {
           })}
         </div>
 
-        {atRiskCount > 0 && (
+        {view === 'work' && atRiskCount > 0 && (
           <button
             onClick={() => set({ tab: 'overdue' })}
             title={`${atRiskCount} with a deadline inside three days`}
@@ -540,12 +552,15 @@ export default function WorkTracker() {
                 ? `Saved ${Math.max(1, Math.round((Date.now() - savedAt) / 1000))}s ago`
                 : ''}
           </span>
-          {anyFilter && (
+          {view === 'work' && anyFilter && (
             <Button variant="ghost" size="sm" onClick={() => set({ tab: '', status: '', priority: '' })}>
               Clear filters
             </Button>
           )}
-          <LockStatus unlocked={unlocked} />
+          {/* The lock governs recorded *work*. Consultations are never frozen,
+              so showing their state here would be a claim about this table that
+              is not true of it. */}
+          {view === 'work' && <LockStatus unlocked={unlocked} />}
           {/* One control, doing both jobs: it narrows the table to one person
               and names who new work is filed under. Left on Everyone the table
               shows the whole team, which is what it opens on. */}
@@ -577,6 +592,18 @@ export default function WorkTracker() {
           <Button size="sm" onClick={() => setAdding(true)} disabled={users.length === 0}>
             <Plus className="h-4 w-4" /> New task
           </Button>
+          {/* Beside New task, because the two are the same kind of act: putting
+              a new record in. Which table it lands in is the difference. */}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              set({ view: 'consultations' });
+              setAdding(false);
+              setAddingConsultation(true);
+            }}
+          >
+            <Plus className="h-4 w-4" /> Add Consultation
+          </Button>
         </div>
       </div>
 
@@ -594,7 +621,14 @@ export default function WorkTracker() {
       )}
 
       <Card className="overflow-hidden">
-        {isLoading ? (
+        {view === 'consultations' ? (
+          <ConsultationsTable
+            users={users}
+            user={user}
+            adding={addingConsultation}
+            onDoneAdding={() => setAddingConsultation(false)}
+          />
+        ) : isLoading ? (
           <TableSkeleton />
         ) : users.length === 0 ? (
           <div className="p-4">
@@ -938,38 +972,8 @@ function TaskRow({
         </td>
       )}
 
-      {visible('consultsAllocated') && (
-        <td {...td('consultationsAllocated')}>
-          <EditableNumber
-            value={task.consultationsAllocated}
-            ariaLabel={`Consultations allocated for ${task.title}`}
-            onSave={(v) => onSave(task.id, 'consultationsAllocated', v)}
-            {...cell('consultationsAllocated')}
-          />
-        </td>
-      )}
 
-      {visible('consultsDone') && (
-        <td {...td('consultationsDone')}>
-          <EditableNumber
-            value={task.consultationsDone}
-            ariaLabel={`Consultations done for ${task.title}`}
-            onSave={(v) => onSave(task.id, 'consultationsDone', v)}
-            {...cell('consultationsDone')}
-          />
-        </td>
-      )}
 
-      {visible('callingsDone') && (
-        <td {...td('callingsDone')}>
-          <EditableNumber
-            value={task.callingsDone}
-            ariaLabel={`Callings done for ${task.title}`}
-            onSave={(v) => onSave(task.id, 'callingsDone', v)}
-            {...cell('callingsDone')}
-          />
-        </td>
-      )}
 
       {visible('reportTo') && (
         <td {...td('reportTo')}>
@@ -1127,6 +1131,26 @@ function LockStatus({ unlocked }: { unlocked: boolean }) {
   );
 }
 
+/**
+ * Shown in place of the work tabs while the consultations table is up: says
+ * which table you are looking at, and gets you back.
+ */
+function ViewSwitch({ onBack }: { onBack: () => void }) {
+  return (
+    <>
+      <button
+        onClick={onBack}
+        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700 dark:hover:text-slate-300"
+      >
+        Work
+      </button>
+      <span className="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-900 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700">
+        Consultations
+      </span>
+    </>
+  );
+}
+
 function NewTaskRow({
   users,
   visible,
@@ -1158,9 +1182,6 @@ function NewTaskRow({
     reportTo?: string | null;
     approverId?: string | null;
     percentage?: number | null;
-    consultationsAllocated?: number | null;
-    consultationsDone?: number | null;
-    callingsDone?: number | null;
   }) => Promise<void>;
 }) {
   const [pickedUser, setPickedUser] = useState(defaultUser ?? users[0]?.id ?? '');
@@ -1174,9 +1195,6 @@ function NewTaskRow({
   const [reportTo, setReportTo] = useState('');
   const [approverId, setApproverId] = useState('');
   const [percentage, setPercentage] = useState('');
-  const [consultsAllocated, setConsultsAllocated] = useState('');
-  const [consultsDone, setConsultsDone] = useState('');
-  const [callingsDone, setCallingsDone] = useState('');
   const [error, setError] = useState<string | null>(null);
   const firstRef = useRef<HTMLInputElement>(null);
 
@@ -1205,12 +1223,9 @@ function NewTaskRow({
       deadlineDate: deadlineDate || null,
       reportTo: reportTo || null,
       approverId: approverId || null,
-      // Blank stays blank. A task with nothing to do with consultations should
-      // say nothing about them, which is not the same as saying zero.
+      // Blank stays blank: nobody having put a figure on it is not the same
+      // as saying zero.
       percentage: percentage === '' ? null : Number(percentage),
-      consultationsAllocated: consultsAllocated === '' ? null : Number(consultsAllocated),
-      consultationsDone: consultsDone === '' ? null : Number(consultsDone),
-      callingsDone: callingsDone === '' ? null : Number(callingsDone),
     });
   };
 
@@ -1326,36 +1341,6 @@ function NewTaskRow({
               placeholder="0-100"
               aria-label="Percentage"
               onChange={(e) => setPercentage(e.target.value.replace(/[^0-9]/g, ''))}
-            />
-          </td>
-        )}
-        {visible('consultsAllocated') && (
-          <td>
-            <RowInput
-              value={consultsAllocated}
-              inputMode="numeric"
-              aria-label="Consultations allocated"
-              onChange={(e) => setConsultsAllocated(e.target.value.replace(/[^0-9]/g, ''))}
-            />
-          </td>
-        )}
-        {visible('consultsDone') && (
-          <td>
-            <RowInput
-              value={consultsDone}
-              inputMode="numeric"
-              aria-label="Consultations done"
-              onChange={(e) => setConsultsDone(e.target.value.replace(/[^0-9]/g, ''))}
-            />
-          </td>
-        )}
-        {visible('callingsDone') && (
-          <td>
-            <RowInput
-              value={callingsDone}
-              inputMode="numeric"
-              aria-label="Callings done"
-              onChange={(e) => setCallingsDone(e.target.value.replace(/[^0-9]/g, ''))}
             />
           </td>
         )}

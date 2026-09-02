@@ -3,6 +3,7 @@
 
 import type {
   AtRiskTask,
+  Consultation,
   Task,
   TaskActivity,
   TaskTabCounts,
@@ -10,6 +11,8 @@ import type {
   User,
 } from '@/types';
 import type {
+  ConsultationInput,
+  ConsultationUpdateInput,
   TaskInput,
   TaskUpdateInput,
   UserInput,
@@ -178,6 +181,43 @@ export const trackerApi = {
       method: 'POST',
       authorised: true,
     });
+  },
+
+  // ---- Consultations -------------------------------------------------------
+  // None of these send the passcode. Consultations are not frozen: they are
+  // running tallies the person who took them updates through the day.
+
+  consultations(user?: string) {
+    return request<{ consultations: Consultation[] }>(
+      `/api/consultations?${qs({ user })}`,
+    );
+  },
+
+  createConsultation(input: ConsultationInput) {
+    return request<{ consultation: Consultation }>('/api/consultations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateConsultation(id: string, patch: ConsultationUpdateInput) {
+    return request<{ consultation: Consultation }>(`/api/consultations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  },
+
+  removeConsultation(id: string) {
+    return request<{ success: boolean }>(`/api/consultations/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  restoreConsultation(id: string) {
+    return request<{ consultation: Consultation }>(
+      `/api/consultations/${id}/restore`,
+      { method: 'POST' },
+    );
   },
 
   /** Live task count per person, for the Settings roster. */
