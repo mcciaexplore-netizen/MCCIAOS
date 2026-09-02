@@ -75,9 +75,10 @@ type ColumnKey = (typeof COLUMNS)[number]['key'];
 const COLUMN_PREF_KEY = 'mccia.tracker.columns';
 // Whose work is on screen, remembered so each person lands on their own list.
 const PERSON_PREF_KEY = 'mccia.tracker.person';
-// Who is filing the work. Separate, so you can read a colleague's list while
-// adding your own.
-const I_AM_PREF_KEY = 'mccia.tracker.iam';
+// Who the app is acting as. Follows the person selector, but survives a switch
+// back to Everyone — an approver signs off other people's work, so they must be
+// able to see the whole team and still be themselves.
+const ACTOR_PREF_KEY = 'mccia.tracker.actor';
 
 /** Closes a popover on Escape, matching SlideOver and Modal. */
 function useEscape(open: boolean, onClose: () => void) {
@@ -130,41 +131,53 @@ function useTrackerParams() {
     [params, setParams],
   );
 
-  return { tab, user, status, priority, sort, dir, set, urlHasUser: params.has('user') };
+  /**
+   * The person selector writes `?user=` even when empty.
+   *
+   * `set` drops empty values, which would delete the key — and an absent key
+   * falls back to the remembered person, so choosing Everyone was immediately
+   * undone. An explicit empty value is a deliberate choice and has to survive.
+   */
+  const setUser = useCallback(
+    (id: string) => {
+      const p = new URLSearchParams(params);
+      p.set('user', id);
+      setParams(p, { replace: true });
+    },
+    [params, setParams],
+  );
+
+  return { tab, user, status, priority, sort, dir, set, setUser, urlHasUser: params.has('user') };
 }
 
 export default function WorkTracker() {
-  const { tab, user, status, priority, sort, dir, set, urlHasUser } = useTrackerParams();
+  const { tab, user, status, priority, sort, dir, set, setUser, urlHasUser } = useTrackerParams();
   const qc = useQueryClient();
   const { toast } = useToast();
 
   const usersQuery = useQuery({ queryKey: ['tracker-users'], queryFn: () => trackerApi.users() });
   const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
 
-  const [iAm, setIAmState] = useState<string>(() => readStored(I_AM_PREF_KEY) ?? '');
-  const setIAm = useCallback((id: string) => {
-    setIAmState(id);
-    writeStored(I_AM_PREF_KEY, id);
-  }, []);
-
-  // Settle on someone once the roster arrives: whoever is being viewed, else
-  // the first member. Never leaves the New task row without an owner.
-  useEffect(() => {
-    if (iAm && users.some((u) => u.id === iAm)) return;
-    const next = users.find((u) => u.id === user)?.id ?? users[0]?.id;
-    if (next) setIAm(next);
-  }, [users, user, iAm, setIAm]);
-
   // Remember whoever is selected, and reflect it back into the URL so the view
-  // stays shareable and a refresh keeps it.
+  // stays shareable and a refresh keeps it. Only ever writes the key when the
+  // URL had none — an explicit `?user=` means Everyone and must stand.
   useEffect(() => {
     writeStored(PERSON_PREF_KEY, user);
-    if (!urlHasUser && user) set({ user });
-  }, [user, urlHasUser, set]);
+    if (!urlHasUser && user) setUser(user);
+  }, [user, urlHasUser, setUser]);
 
-  // "I am" is who the app treats as the current user, since there is no
-  // session: it files new work and gates approval. A label, not a boundary.
-  const actor = iAm || undefined;
+  // Who the app is acting as. It follows the selector, but a switch to Everyone
+  // keeps the last person: approving is done on somebody else's work, so the
+  // approver has to be able to widen the table without stopping being
+  // themselves. A label, not a boundary — there is no session behind it.
+  const [actorId, setActorId] = useState<string>(() => readStored(ACTOR_PREF_KEY) ?? '');
+  useEffect(() => {
+    if (!user) return;
+    setActorId(user);
+    writeStored(ACTOR_PREF_KEY, user);
+  }, [user]);
+  const actor = actorId && users.some((u) => u.id === actorId) ? actorId : undefined;
+  const actorName = users.find((u) => u.id === actor)?.name;
 
   const filters = useMemo(
     () => ({ tab, user, status, priority, sort, dir }),
@@ -439,43 +452,6 @@ export default function WorkTracker() {
           })}
         </div>
 
-        {/* Whose work is on screen. */}
-        <div className="w-40">
-          <Select
-            value={user}
-            onChange={(e) => set({ user: e.target.value })}
-            aria-label="Whose work to show"
-            className="py-1.5 text-sm"
-          >
-            <option value="">Everyone</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        {/* Who is filing the work. Separate on purpose: you can read a
-            colleague's list while adding your own task. */}
-        <label className="flex items-center gap-1.5">
-          <span className="whitespace-nowrap text-xs text-slate-400">I am</span>
-          <span className="w-36">
-            <Select
-              value={iAm}
-              onChange={(e) => setIAm(e.target.value)}
-              aria-label="Who is adding this work"
-              className="py-1.5 text-sm"
-            >
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </Select>
-          </span>
-        </label>
-
         {atRiskCount > 0 && (
           <button
             onClick={() => set({ tab: 'overdue' })}
@@ -499,6 +475,38 @@ export default function WorkTracker() {
             <Button variant="ghost" size="sm" onClick={() => set({ tab: '', status: '', priority: '' })}>
               Clear filters
             </Button>
+          )}
+          {/* One control, doing both jobs: it narrows the table to one person
+              and names who new work is filed under. Left on Everyone the table
+              shows the whole team, which is what it opens on. */}
+          <label className="flex items-center gap-1.5">
+            <span className="whitespace-nowrap text-xs text-slate-400">I am</span>
+            <span className="w-36">
+              <Select
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                aria-label="Who is adding this work"
+                title="Picks whose work is shown, and who new tasks are filed under"
+                className="py-1.5 text-sm"
+              >
+                <option value="">Everyone</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+            </span>
+          </label>
+          {/* On Everyone the selector no longer names you, so say it plainly
+              rather than leave approvals looking arbitrary. */}
+          {!user && actorName && (
+            <span
+              className="whitespace-nowrap text-xs text-slate-400"
+              title="New work and approvals are filed under this name"
+            >
+              acting as {actorName}
+            </span>
           )}
           <Button size="sm" onClick={() => setAdding(true)} disabled={users.length === 0}>
             <Plus className="h-4 w-4" /> New task
@@ -612,7 +620,7 @@ export default function WorkTracker() {
                     <NewTaskRow
                       users={users}
                       visible={visible}
-                      defaultUser={iAm || user || users[0]?.id}
+                      defaultUser={user || actor || users[0]?.id}
                       pending={create.isPending}
                       onCancel={() => setAdding(false)}
                       onCreate={async (input) => {

@@ -128,10 +128,9 @@ Computed per query, never stored, so they cannot go stale.
 One compact row above the table, nothing else between the title and the work:
 
 - **Tabs** — All work, Assigned to me, Overdue, each with a count badge.
-- **Person picker** — whose work is on screen, or Everyone.
-- **I am** — who is filing the work. New rows are theirs, and approval is
-  checked against them. Separate from the person picker on purpose, so you can
-  read a colleague's list while adding your own task.
+- **I am** — one selector on the right, beside New task. It narrows the table
+  to one person and names who new work is filed under. The table opens on
+  **Everyone**, showing the whole team.
 - **At risk** — an amber chip when anything has a deadline inside three days.
 - **New task**, and the autosave state.
 
@@ -147,9 +146,14 @@ per-user in `localStorage`.
 
 ### Identity
 
-There is no login. The **I am** block is treated as the current user and is
+There is no login. The **I am** selector is treated as the current user and is
 passed to the API as `?actor=`. **This is a label, not authentication** — a
 caller can name anyone. Real enforcement needs the auth described above.
+
+Switching back to Everyone widens the table but **keeps you as the last person
+picked**, shown as "acting as …" beside the selector. Approval is done on
+somebody else's work, so an approver has to be able to see the whole team
+without ceasing to be themselves.
 
 ### Team and reporting lines
 
