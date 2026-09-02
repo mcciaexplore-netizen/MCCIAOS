@@ -231,6 +231,27 @@ export const trackerApi = {
     );
   },
 
+  /** Replaces who is on a task alongside its owner. Send the whole set. */
+  setMembers(id: string, members: string[], actor?: string) {
+    return request<{ task: Task }>(`/api/tasks/${id}/members?${qs({ actor })}`, {
+      method: 'PUT',
+      body: JSON.stringify({ members }),
+      authorised: true,
+    });
+  },
+
+  /** Work more than one person is on. */
+  sharedWork(user?: string) {
+    return request<{
+      shared: {
+        id: string;
+        title: string;
+        ownerName: string;
+        people: { name: string; colour: string | null }[];
+      }[];
+    }>(`/api/shared-work?${qs({ user })}`);
+  },
+
   /** Live task count per person, for the Settings roster. */
   taskCounts() {
     return request<{ counts: Record<string, number> }>('/api/task-counts');

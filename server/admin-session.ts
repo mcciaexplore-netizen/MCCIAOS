@@ -27,7 +27,7 @@
  * who administers this app, so a session proves somebody knew it — never who
  * they were. Nothing here can attribute a change to a person.
  */
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export const ADMIN_COOKIE = 'mccia_admin';
 
@@ -53,59 +53,6 @@ export function adminPassword(): string | null {
     process.env.SETTINGS_PASSCODE?.trim() ||
     null
   );
-}
-
-/**
- * Passwords that must never be used, because they are in this repository's
- * history and anyone with repo access can read them.
- *
- * Compared as SHA-256 digests so the list itself does not reintroduce the
- * literals it exists to forbid.
- */
-const PUBLISHED_DIGESTS = new Set([
-  // The former development fallback, committed in db5f6e8, bcbd75c and
-  // 4942436. Named by its digest rather than its text: writing it here would
-  // re-publish the very string this list exists to forbid.
-  'f851f3afffa4a786a9295c8076eb2eac94683cd131fd6783d566b0ee807b51e4',
-]);
-
-function digest(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex');
-}
-
-export interface PasswordWarning {
-  level: 'severe' | 'weak';
-  message: string;
-}
-
-/**
- * Complains about a configured password without refusing it.
- *
- * Deliberately advisory. Refusing to start over a strength heuristic would lock
- * somebody out of their own application on a guess, and the operator setting an
- * environment variable is trusted by definition — the app cannot tell a short
- * password chosen on purpose from a mistake. What it *can* tell, exactly and
- * without guessing, is that a specific string has been published; that is worth
- * saying loudly every time the process starts.
- */
-export function passwordWarning(): PasswordWarning | null {
-  const password = adminPassword();
-  if (!password) return null;
-
-  if (PUBLISHED_DIGESTS.has(digest(password))) {
-    return {
-      level: 'severe',
-      message:
-        'The admin password is one that appears in this repository\u2019s git history. Anyone with repo access can read it. Change ADMIN_SETTINGS_PASSWORD.',
-    };
-  }
-  if (password.length < 12) {
-    return {
-      level: 'weak',
-      message: `The admin password is ${password.length} characters. It is the only thing standing in front of Settings; 16 or more is worth the extra typing.`,
-    };
-  }
-  return null;
 }
 
 /** Not the password itself, so the cookie reveals nothing about it. */

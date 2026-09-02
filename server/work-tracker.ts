@@ -83,6 +83,7 @@ interface TaskRow {
   priority: string;
   status: string;
   percentage: number | null;
+  members: { id: string; name: string; colour: string | null }[] | null;
   allocation_date: string | null;
   due_date: string | null;
   deadline_date: string | null;
@@ -106,6 +107,14 @@ interface TaskRow {
 const TASK_COLUMNS = `
   t.id, t.user_id, uo.name as user_name, t.title, t.priority, t.status,
   t.percentage,
+  -- Everybody else on this task, aggregated here so a list of 50 tasks is one
+  -- query rather than 51. Empty array, never null, so callers need no guard.
+  coalesce((
+    select json_agg(json_build_object('id', mu.id, 'name', mu.name, 'colour', mu.colour)
+                    order by mu.name)
+      from task_members m join users mu on mu.id = m.user_id
+     where m.task_id = t.id
+  ), '[]'::json) as members,
   to_char(t.allocation_date, 'YYYY-MM-DD') as allocation_date,
   to_char(t.due_date,        'YYYY-MM-DD') as due_date,
   to_char(t.deadline_date,   'YYYY-MM-DD') as deadline_date,
@@ -140,6 +149,7 @@ function toTask(row: TaskRow): Task {
     priority: row.priority as TaskPriority,
     status: row.status as TaskStatus,
     percentage: row.percentage,
+    members: row.members ?? [],
     allocationDate: row.allocation_date,
     dueDate: row.due_date,
     deadlineDate: row.deadline_date,
@@ -710,6 +720,95 @@ export async function restoreTasksForUser(
     ]);
   }
   return rows.length;
+}
+
+/**
+ * Replaces the set of people working on a task alongside its owner.
+ *
+ * Whole-set rather than add/remove one at a time: the UI presents it as a list
+ * of ticks, so sending the resulting list is what it actually knows. It also
+ * makes the operation idempotent — sending the same set twice changes nothing,
+ * where a sequence of adds and removes could half-apply.
+ *
+ * The owner is never stored here. They are `tasks.user_id`, and duplicating
+ * them would make "how many people" ambiguous depending on which you counted.
+ */
+export async function setTaskMembers(
+  taskId: string,
+  userIds: string[],
+  actorId: string | null,
+): Promise<Task | null> {
+  const existing = await getTask(taskId);
+  if (!existing) return null;
+  const db = requireSql();
+
+  // Anyone unknown, inactive, or the owner themselves is dropped rather than
+  // rejected: the caller sent a set, and silently ignoring a member who cannot
+  // be one is kinder than refusing the whole change over a stale checkbox.
+  const wanted = [...new Set(userIds.filter((id) => UUID_RE.test(id) && id !== existing.userId))];
+  const valid = wanted.length
+    ? ((await db.query(
+        `select id from users where id = any($1::uuid[]) and is_active`,
+        [wanted],
+      )) as { id: string }[]).map((r) => r.id)
+    : [];
+
+  await db.query(`delete from task_members where task_id = $1::uuid`, [taskId]);
+  if (valid.length) {
+    const tuples = valid.map((_, i) => `($1::uuid, $${i + 2}::uuid)`).join(', ');
+    await db.query(
+      `insert into task_members (task_id, user_id) values ${tuples}`,
+      [taskId, ...valid],
+    );
+  }
+
+  const before = existing.members.map((m) => m.name).sort().join(', ');
+  const after = (await getTask(taskId))?.members.map((m) => m.name).sort().join(', ') ?? '';
+  if (before !== after) {
+    await recordActivity(taskId, actorId, [
+      { field: 'members', oldValue: before || null, newValue: after || null },
+    ]);
+  }
+  return getTask(taskId);
+}
+
+/**
+ * Work that more than one person is on, for the tracker's shared-work panel.
+ *
+ * Counts the owner too, so "3 people" means three, not the owner plus three.
+ */
+export async function getSharedWork(
+  user?: string | null,
+): Promise<{ id: string; title: string; ownerName: string; people: { name: string; colour: string | null }[] }[]> {
+  const db = requireSql();
+  const who = user && UUID_RE.test(user) ? user : null;
+  const rows = (await db.query(
+    `select t.id, t.title, uo.name as owner_name,
+            json_build_object('name', uo.name, 'colour', uo.colour) as owner,
+            coalesce((
+              select json_agg(json_build_object('name', mu.name, 'colour', mu.colour) order by mu.name)
+                from task_members m join users mu on mu.id = m.user_id
+               where m.task_id = t.id
+            ), '[]'::json) as members
+       from tasks t join users uo on uo.id = t.user_id
+      where ${LIVE}
+        and exists (select 1 from task_members m where m.task_id = t.id)
+        and ($1::uuid is null
+             or t.user_id = $1::uuid
+             or exists (select 1 from task_members m2 where m2.task_id = t.id and m2.user_id = $1::uuid))
+      order by t.created_at desc`,
+    [who],
+  )) as Record<string, unknown>[];
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    title: String(r.title),
+    ownerName: String(r.owner_name),
+    people: [
+      r.owner as { name: string; colour: string | null },
+      ...((r.members ?? []) as { name: string; colour: string | null }[]),
+    ],
+  }));
 }
 
 /** Puts back a task that was removed. Undo, and the reason hiding beats deleting. */

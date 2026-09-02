@@ -33,6 +33,7 @@ import {
   formatJiraDate,
 } from '@/components/TrackerCells';
 import { ConsultationsTable } from '@/components/ConsultationsTable';
+import { SharedWorkButton, TeamOnTask } from '@/components/TeamOnTask';
 import { useToast } from '@/components/Toast';
 import { trackerApi, type TabKey } from '@/lib/workTrackerApi';
 import {
@@ -385,7 +386,11 @@ export default function WorkTracker() {
    */
   const peopleWidth = useMemo(() => {
     const longest = users.reduce((n, u) => Math.max(n, u.name.length), 0);
-    return Math.min(230, Math.max(112, 46 + Math.ceil(longest * 7.8)));
+    // 46 for one avatar and the cell padding, +22 for the team button at the
+    // end, +32 for the two extra avatars a stack of three adds (each overlaps
+    // by 8). Without the last two the name was eaten: "Aarushi" showed as
+    // "Aaru…" once a second person joined.
+    return Math.min(280, Math.max(166, 46 + 22 + 32 + Math.ceil(longest * 7.8)));
   }, [users]);
 
   const widthOf = useCallback(
@@ -576,10 +581,10 @@ export default function WorkTracker() {
               Clear filters
             </Button>
           )}
-          {/* The lock governs recorded *work*. Consultations are never frozen,
-              so showing their state here would be a claim about this table that
-              is not true of it. */}
-          {view === 'work' && <LockStatus unlocked={unlocked} />}
+          {/* Beside the person picker, because it answers the question that
+              picker cannot: the table lists a task once, under its owner, so a
+              collaborator's involvement is invisible until you open that row. */}
+          {view === 'work' && <SharedWorkButton user={user} />}
           {/* One control, doing both jobs: it narrows the table to one person
               and names who new work is filed under. Left on Everyone the table
               shows the whole team, which is what it opens on. */}
@@ -794,6 +799,10 @@ export default function WorkTracker() {
                       cellErrors={cellErrors}
                       onSave={save}
                       onActivity={() => setActivityFor(t)}
+                      onMembersChanged={() => {
+                        qc.invalidateQueries({ queryKey: ['tasks'] });
+                        qc.invalidateQueries({ queryKey: ['shared-work'] });
+                      }}
                       onApprove={() => approve.mutate(t.id)}
                       onDelete={() => {
                         if (window.confirm(`Delete "${t.title}"? This cannot be undone.`))
@@ -842,6 +851,7 @@ function TaskRow({
   onActivity,
   onApprove,
   onDelete,
+  onMembersChanged,
 }: {
   task: Task;
   users: User[];
@@ -851,7 +861,7 @@ function TaskRow({
   /** Who this task may report to / be approved by — see the page-level comment. */
   reportOptions: (keeping: string | null) => User[];
   approverOptions: (keeping: string | null) => User[];
-  /** Whether this tab holds the admin passcode; frozen cells reopen when it does. */
+  /** Whether recorded work may be edited. Switched in Settings; see lib/editLock. */
   unlocked: boolean;
   savingCells: Record<string, boolean>;
   cellErrors: Record<string, string>;
@@ -859,8 +869,11 @@ function TaskRow({
   onActivity: () => void;
   onApprove: () => void;
   onDelete: () => void;
+  /** Refreshes the table and the shared-work panel after the team changes. */
+  onMembersChanged: () => void;
 }) {
   const [menu, setMenu] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   useEscape(menu, () => setMenu(false));
   const k = (field: string) => `${task.id}:${field}`;
 
@@ -888,7 +901,7 @@ function TaskRow({
   /** Says why a cell will not open, on the element people actually hover. */
   const td = (field: string) =>
     frozen(field)
-      ? { title: 'Already recorded. Unlock with the admin passcode to change it.' }
+      ? { title: 'Already recorded. Settings \u2192 Work Tracker unlocks editing.' }
       : {};
 
   // Approval is enabled only on completed work, and only for its own approver.
@@ -906,14 +919,19 @@ function TaskRow({
   return (
     <tr className="group" style={{ background: 'var(--n0)' }}>
       {visible('name') && (
-        <td className="sticky z-10" style={{ left: 0, background: 'inherit' }} {...td('userId')}>
-          <UserCell
-            value={task.userId}
+        <td
+          className="sticky"
+          // Lifted while the picker is open. Sticky cells all sit at z-10, so a
+          // popup in one is painted over by the cells after it.
+          style={{ left: 0, background: 'inherit', zIndex: teamOpen ? 60 : 10 }}
+          {...td('userId')}
+        >
+          <TeamOnTask
+            task={task}
             users={users}
-            allowEmpty={false}
-            ariaLabel={`Person doing ${task.title}`}
-            onSave={(v) => v && onSave(task.id, 'userId', v)}
-            {...cell('userId')}
+            disabled={frozen('userId')}
+            onChanged={onMembersChanged}
+            onOpenChange={setTeamOpen}
           />
         </td>
       )}
@@ -1091,7 +1109,7 @@ function TaskRow({
                   onDelete();
                 }}
                 disabled={!unlocked}
-                title={unlocked ? undefined : 'Unlock with the admin passcode to delete'}
+                title={unlocked ? undefined : 'Settings \u2192 Work Tracker unlocks deleting'}
                 style={{ color: unlocked ? 'var(--r400)' : 'var(--n200)' }}
                 className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[color:var(--n20)] disabled:cursor-not-allowed disabled:hover:bg-transparent"
               >
@@ -1142,36 +1160,6 @@ RowInput.displayName = 'RowInput';
  */
 function RowSelect({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className={cn(ROW_CONTROL, 'row-select', className)} {...props} />;
-}
-
-/**
- * Says whether the table is editable, and sends you to where that is decided.
- *
- * A status, not a switch: unlocking lives in Settings now. It stays visible on
- * the tracker because the alternative is discovering the table is read-only by
- * clicking a cell and finding it inert, and then having nowhere obvious to go.
- */
-function LockStatus({ unlocked }: { unlocked: boolean }) {
-  return (
-    <Link
-      to="/settings?tab=work-tracker"
-      title={
-        unlocked
-          ? 'Recorded work can be edited. Lock it in Settings.'
-          : 'Recorded work is read-only. Unlock it in Settings.'
-      }
-      className={cn(
-        'flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-sm',
-        'hover:bg-slate-100 dark:hover:bg-slate-800',
-        unlocked
-          ? 'text-amber-600 dark:text-amber-400'
-          : 'text-slate-400 dark:text-slate-500',
-      )}
-    >
-      {unlocked ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-      {unlocked ? 'Unlocked' : 'Locked'}
-    </Link>
-  );
 }
 
 /**

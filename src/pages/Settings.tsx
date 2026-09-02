@@ -45,6 +45,8 @@ import { useSaveSettings, useSettings } from '@/settings/SettingsContext';
 import { BADGE_TONES, DEFAULT_SETTINGS } from '@/constants';
 import { api } from '@/lib/api';
 import { useEditLock } from '@/hooks/useEditLock';
+import { useSettingsGate } from '@/hooks/useSettingsGate';
+import { enter as enterSettings, leave as leaveSettings } from '@/lib/settingsPassword';
 import { trackerApi } from '@/lib/workTrackerApi';
 import type { UserInput, UserUpdateInput } from '@/schemas/workTracker';
 import { cn } from '@/lib/utils';
@@ -160,9 +162,104 @@ const GROUPS: Group[] = [
   },
 ];
 
-/** Settings opens directly. The password gate was removed by request. */
+/**
+ * The Settings password gate.
+ *
+ * One password, no username, no accounts. Knowing it opens Settings for this
+ * browser for eight hours; Sign out ends it sooner.
+ */
+function PasswordGate({ children }: { children: ReactNode }) {
+  const gate = useSettingsGate();
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await enterSettings(password);
+      setPassword('');
+    } catch (err) {
+      setError((err as Error).message || 'That password is not right');
+      setPassword('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Nothing is known on first paint. Prompting here would flash the password
+  // box at somebody who is already through.
+  if (gate.checking) {
+    return (
+      <div>
+        <PageHeader title="Settings" />
+        <Card className="mx-auto max-w-sm p-6">
+          <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            One moment
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (gate.open) return <>{children}</>;
+
+  return (
+    <div>
+      <PageHeader title="Settings" subtitle="Enter the password to continue." />
+      <Card className="mx-auto max-w-sm p-6">
+        <div className="mb-4 flex flex-col items-center text-center">
+          <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+            <Lock className="h-5 w-5" />
+          </span>
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+            Settings is password protected
+          </p>
+        </div>
+        <form onSubmit={submit}>
+          <label htmlFor="settings-password" className="sr-only">
+            Settings password
+          </label>
+          <Input
+            id="settings-password"
+            type="password"
+            autoFocus
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? 'settings-password-error' : undefined}
+          />
+          {error && (
+            <p
+              id="settings-password-error"
+              role="alert"
+              className="mt-2 text-xs text-rose-600 dark:text-rose-400"
+            >
+              {error}
+            </p>
+          )}
+          <Button type="submit" className="mt-3 w-full" disabled={busy || !password.trim()}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            Continue
+          </Button>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
 export default function Settings() {
-  return <SettingsInner />;
+  return (
+    <PasswordGate>
+      <SettingsInner />
+    </PasswordGate>
+  );
 }
 
 function SettingsInner() {
@@ -241,6 +338,17 @@ function SettingsInner() {
         subtitle="Organisation details, the team roster, and the values the rest of the app reads."
         actions={
           <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                await leaveSettings();
+                toast('Signed out of Settings');
+              }}
+              title="Close Settings until the password is entered again"
+            >
+              <LogOut className="h-4 w-4" /> Sign out
+            </Button>
             <Button
               variant="secondary"
               size="sm"

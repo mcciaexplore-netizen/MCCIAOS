@@ -252,6 +252,15 @@ export interface Task {
    */
   percentage: number | null;
 
+  /**
+   * Everybody else on this task. `userId` is still the person it belongs to and
+   * is listed under; these are the people working on it with them.
+   *
+   * Always an array — empty when nobody else is on it, never null, so nothing
+   * that renders it needs a guard.
+   */
+  members: { id: string; name: string; colour: string | null }[];
+
   reportTo: string | null;
   reportToName: string | null;
   approverId: string | null;

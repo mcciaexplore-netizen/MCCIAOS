@@ -34,6 +34,8 @@ import {
   deleteTasksForUser,
   restoreTasksForUser,
   taskCountsByUser,
+  setTaskMembers,
+  getSharedWork,
 } from './work-tracker.js';
 import {
   ConsultationError,
@@ -50,7 +52,6 @@ import {
   isAdmin,
   issueSession,
   passwordMatches,
-  passwordWarning,
   readSession,
   sessionCookie,
 } from './admin-session.js';
@@ -382,12 +383,9 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   if (pathname === '/api/admin/session') {
     if (method !== 'GET') return json(405, { error: 'Method not allowed' });
     const state = readSession(req.headers['cookie']);
-    const warning = passwordWarning();
     return json(200, {
       authenticated: state.valid,
       expiresAt: state.valid ? state.expiresAt : null,
-      // The complaint, never the password it is about.
-      warning: warning ?? undefined,
       // Lets the page say "your session expired" rather than a blank prompt.
       reason: state.valid ? undefined : state.reason,
       configured: adminPassword() !== null,
@@ -457,6 +455,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     pathname.startsWith('/api/tasks') ||
     pathname.startsWith('/api/users') ||
     pathname === '/api/task-counts' ||
+    pathname === '/api/shared-work' ||
     pathname.startsWith('/api/consultations') ||
     pathname === '/api/export/daily' ||
     pathname === '/api/summary' ||
@@ -974,6 +973,20 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     );
     if (consultMatch) {
       const [, id, sub] = consultMatch;
+      // Who is on this task alongside its owner. The whole set is sent, so
+      // repeating a call changes nothing.
+      if (sub === 'members') {
+        if (method !== 'PUT') return json(405, { error: 'Method not allowed' });
+        const body = (req.body ?? {}) as { members?: unknown };
+        const ids = Array.isArray(body.members)
+          ? body.members.filter((v): v is string => typeof v === 'string')
+          : null;
+        if (!ids) return json(400, { error: 'Send members as an array of user ids' });
+        const task = await setTaskMembers(id, ids, actor);
+        if (!task) return json(404, { error: 'Not found' });
+        return json(200, { task });
+      }
+
       if (sub === 'restore') {
         if (method !== 'POST') return json(405, { error: 'Method not allowed' });
         const back = await restoreConsultation(id);
@@ -996,6 +1009,13 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
       return json(405, { error: 'Method not allowed' });
     }
 
+    // ---- /api/shared-work ----------------------------------------------------
+    // Work that more than one person is on.
+    if (pathname === '/api/shared-work') {
+      if (method !== 'GET') return json(405, { error: 'Method not allowed' });
+      return json(200, { shared: await getSharedWork(query.get('user')) });
+    }
+
     // ---- /api/task-counts --------------------------------------------------
     // Live task count per person, for the Settings roster.
     if (pathname === '/api/task-counts') {
@@ -1004,11 +1024,25 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     }
 
     // ---- /api/tasks/:id[/approve] ------------------------------------------
-    const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(approve|restore))?$/);
+    const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(approve|restore|members))?$/);
     if (taskMatch) {
       const [, id, sub] = taskMatch;
 
       // Undo for a removal. Passcode-gated like the delete it reverses.
+      // Who is on this task alongside its owner. The whole set is sent, so
+      // repeating a call changes nothing.
+      if (sub === 'members') {
+        if (method !== 'PUT') return json(405, { error: 'Method not allowed' });
+        const body = (req.body ?? {}) as { members?: unknown };
+        const ids = Array.isArray(body.members)
+          ? body.members.filter((v): v is string => typeof v === 'string')
+          : null;
+        if (!ids) return json(400, { error: 'Send members as an array of user ids' });
+        const task = await setTaskMembers(id, ids, actor);
+        if (!task) return json(404, { error: 'Not found' });
+        return json(200, { task });
+      }
+
       if (sub === 'restore') {
         if (method !== 'POST') return json(405, { error: 'Method not allowed' });
         if (!holdsPasscode(req)) {
