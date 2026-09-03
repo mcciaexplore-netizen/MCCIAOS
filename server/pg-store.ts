@@ -1,7 +1,7 @@
 // Neon Postgres store. Selected from server/store.ts when DATABASE_URL is set.
 //
 // Uses the Neon HTTP driver so the same module works in both runtimes the API
-// runs under: the Vite dev middleware (Node) and the Vercel function.
+// runs under: the Vite dev middleware (Node), and any adapter added later.
 // Table shape is defined in db/migrations.sql.
 
 import { neon } from '@neondatabase/serverless';

@@ -79,7 +79,7 @@ export const ORG_SECTIONS: Section[] = [
     blurb: 'How the Work Tracker behaves.',
     fields: [
       { key: 'atRiskDays', label: 'At-risk window (days)', kind: 'number', half: true, min: 1, max: 30, help: 'A deadline this many days away or nearer counts as at risk.' },
-      { key: 'dailyExportTime', label: 'Daily export time', kind: 'time', half: true, help: 'IST. The deployed schedule is set in vercel.json and must match.' },
+      { key: 'dailyExportTime', label: 'Daily export time', kind: 'time', half: true, help: 'IST. Recorded here; nothing schedules it automatically.' },
       { key: 'dailyExportEnabled', label: 'Run the daily export to Google Sheets', kind: 'toggle' },
     ],
   },

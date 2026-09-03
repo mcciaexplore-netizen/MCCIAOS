@@ -1,5 +1,5 @@
 // Mounts the runtime-agnostic API handler as Vite dev middleware, so
-// /api/* works during `npm run dev` exactly as it will on Vercel.
+// /api/* works during `npm run dev` through the same runtime-agnostic handler.
 
 import type { Plugin, ViteDevServer } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -20,7 +20,7 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
-/** Methods whose requests may carry a body. Must match the Vercel adapter. */
+/** Methods whose requests may carry a body. */
 const METHODS_WITH_BODY = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export function apiMiddleware(): Plugin {
@@ -43,7 +43,7 @@ export function apiMiddleware(): Plugin {
           }
 
           // Every method that can carry one. PUT was missing, so a PUT arrived
-          // with no body in development and a full one on Vercel — the handler
+          // with no body in development and a full one behind a real server —
           // saw an empty patch, validated it happily and saved nothing, with a
           // 200 to say so. Divergence between the two runtimes is worse than
           // either behaviour on its own.

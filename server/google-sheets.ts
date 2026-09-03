@@ -8,7 +8,7 @@
  *
  * CREDENTIALS. A Google Cloud service account with the Sheets API enabled, and
  * the target spreadsheet shared with that account's address as an Editor. The
- * key arrives in two environment variables rather than a file, because Vercel
+ * key arrives in two environment variables rather than a file, because a host
  * has no filesystem to put a file on:
  *
  *   GOOGLE_SERVICE_ACCOUNT_EMAIL  ...@...iam.gserviceaccount.com

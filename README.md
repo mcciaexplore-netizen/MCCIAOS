@@ -38,7 +38,7 @@ Other scripts: `npm run build` (typecheck + prod build), `npm run typecheck`.
 | Layer | Choice |
 |---|---|
 | Frontend | React 18 + TypeScript + Vite, Tailwind, React Query, react-hook-form + Zod, react-router (lazy pages) |
-| API | Runtime-agnostic handler in `server/handlers.ts`, shared by Vite dev middleware (`server/vite-plugin.ts`) and a Vercel catch-all (`api/[...path].ts`) |
+| API | Runtime-agnostic handler in `server/handlers.ts`, served by the Vite dev middleware (`server/vite-plugin.ts`) |
 | Data | Single generic `records` table (JSONB `data` + `sheet` discriminator). Neon Postgres when `DATABASE_URL` is set (`db/migrations.sql`), else a local JSON file store |
 
 **Exception — Workshops & Events** is the one module with dedicated tables
@@ -374,40 +374,25 @@ src/
   pages/         WorkTracker, Events*, Social, Resources, Messages, Templates, Settings
 server/          store (file/Postgres), runtime-agnostic handlers, Vite plugin,
                  events + work-tracker (dedicated-table data access)
-api/             Vercel function wrapper
 db/              production SQL schema + one-time migrations,
                  events + work-tracker schemas
 ```
 
-## Deploying to Neon + Vercel
-1. Run `db/migrations.sql` against your Neon database, then `db/events.sql`
-   and `db/work-tracker.sql` (both additive and idempotent — they only create
-   their own tables; `work-tracker.sql` reads `records` once, to seed the team
-   roster from Settings, and never writes to it).
-2. Set `DATABASE_URL` as a Vercel environment variable (the same pooled Neon
-   connection string used locally). `server/store.ts` picks up Postgres
-   automatically whenever it is present.
-3. Deploy to Vercel — `vercel.json` routes `/api/*` to the catch-all function
-   and everything else to the SPA.
+## Deploying
 
+**There is no deployment target configured.** The Vercel adapter
+(`api/[...path].ts`) and `vercel.json` were removed deliberately; the app runs
+through `npm run dev`, which mounts the same runtime-agnostic handler as Vite
+middleware.
 
-**Removing work does not destroy it.** Deleting a task sets `tasks.deleted_at`
-and every read filters on it, so the row and its history stay. The toast that
-confirms a deletion offers **Undo** for ten seconds, and
-`POST /api/tasks/:id/restore` does the same thing from the API — both need the
-passcode, like the delete they reverse.
+To host it again, write a new adapter that converts the platform's request into
+`ApiRequest` and writes back `ApiResponse` — `server/vite-plugin.ts` is the
+working reference, about forty lines. `server/handlers.ts` needs no changes; that
+is the point of keeping it runtime-agnostic.
 
-This exists because deletion was the one hole in the freeze. Changing a filled
-field needed the passcode, but deleting the row needed the same passcode and
-left nothing at all: `task_activity` cascades, so the trail went with it. A task
-called "Mail IIT's" was lost that way on 2026-09-02 and the database could not
-say what had happened to it. Each history row now also carries `task_title`, so
-the trail reads on its own and a later rename does not rewrite the past.
+Set `DATABASE_URL` to the pooled Neon connection string wherever it runs, and
+apply the migrations in `db/` first.
 
-Migration: `db/work-tracker-history.sql`, applied with
-`node scripts/migrate.mjs db/work-tracker-history.sql`. Additive and idempotent
-— it adds two columns and an index, drops nothing, and leaves every existing row
-visible.
 
 ## Clearing and restoring
 
@@ -442,36 +427,18 @@ account:
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | the service account's `client_email` |
 | `GOOGLE_PRIVATE_KEY` | its `private_key`, newlines escaped as `\n` |
 | `SHEETS_SPREADSHEET_ID` | the id in the sheet's URL |
-| `CRON_SECRET` | any long random string; Vercel Cron presents it |
+| `CRON_SECRET` | any long random string; a scheduler presents it |
 
 1. Google Cloud console → new project (or an existing one) → enable the
    **Google Sheets API**.
 2. Create a **service account**, then a **JSON key** for it.
 3. Open the spreadsheet → Share → paste the service account's address → **Editor**.
    Without this every call returns 403, and the error says so by name.
-4. Put the four variables in Vercel's project settings.
+4. Put the four variables in the environment wherever the app runs.
 
 **There is no schedule.** The export runs when somebody presses **Run now** in
-Settings, or when `POST /api/export/daily` is called with `CRON_SECRET`. The
-Vercel cron entry was removed deliberately — deployment and scheduling are done
-by hand here.
-
-To put a schedule back, add to `vercel.json`:
-
-```json
-"crons": [{ "path": "/api/export/daily", "schedule": "30 12 * * *" }]
-```
-
-12:30 UTC is 18:00 IST. Vercel Cron runs in UTC with no timezone setting, so the
-offset is baked into the expression.
-
-The client is `server/google-sheets.ts` — a signed JWT and three REST calls
-rather than the `googleapis` package, which is tens of megabytes for the same
-three endpoints. `server/daily-export.ts` builds the rows.
-
-Nothing here is required: with none of the variables set the app runs exactly as
-before, and the endpoint answers 501 explaining what is missing.
-
+Settings, or when `POST /api/export/daily` is called with `CRON_SECRET`. Nothing
+fires it automatically — there is no deployment target and no cron.
 
 
 ## Settings and admin access

@@ -125,9 +125,9 @@ export function isAdmin(cookieHeader: string | undefined, now = Date.now()): boo
 }
 
 function cookieFlags(): string {
-  // Secure only where there is TLS; localhost is plain http and the cookie
-  // would simply never be stored.
-  const secure = Boolean(process.env.VERCEL) || process.env.NODE_ENV === 'production';
+  // Secure only where there is TLS. Localhost is plain http, and a Secure
+  // cookie there is simply never stored.
+  const secure = process.env.NODE_ENV === 'production';
   return [
     'Path=/',
     'HttpOnly',

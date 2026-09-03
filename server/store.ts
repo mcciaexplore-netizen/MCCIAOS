@@ -15,12 +15,15 @@ export { SHEET_ALLOWLIST, isValidSheet } from './store-types.js';
 
 const connectionString = process.env.DATABASE_URL?.trim();
 
-// Vercel and Lambda both expose a read-only filesystem outside /tmp, so the
-// JSON file store cannot work there — it throws EROFS on the first mkdir,
-// which surfaces as an opaque 500 on every page. Detect the platform so the
-// cause can be named instead of guessed at.
+// Serverless hosts expose a read-only filesystem outside /tmp, so the JSON
+// file store cannot work there — it throws EROFS on the first mkdir, which
+// surfaces as an opaque 500 on every page. Detect it so the cause can be named
+// instead of guessed at.
+//
+// Kept vendor-neutral: the failure is a property of read-only filesystems, not
+// of any one host, and this app no longer targets a specific platform.
 const isServerless = Boolean(
-  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME,
+  process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.FUNCTION_TARGET,
 );
 
 /** What the store is doing right now, for /api/health. Never includes secrets. */

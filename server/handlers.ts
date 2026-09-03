@@ -1,5 +1,5 @@
 // Runtime-agnostic request handling. Consumed by both the Vite dev
-// middleware (server/vite-plugin.ts) and the Vercel functions (api/*.ts),
+// middleware (server/vite-plugin.ts) and any other adapter,
 // so dev and prod behave identically (TRD.md section 8).
 
 import { importSchemaForSheet, schemaForSheet } from '../src/schemas/index.js';
@@ -129,10 +129,8 @@ const UNDEFINED_TABLE = '42P01';
  *
  * A missing table is a deployment step that has not been done, not a bug, and
  * naming it is the difference between "Something went wrong" and knowing which
- * file to run. This follows the reasoning already written into
- * api/[...path].ts: the failures this internal tool actually hits are
- * configuration ones, and a generic string leaves whoever is on call with
- * nothing to act on.
+ * file to run. The failures this internal tool actually hits are configuration
+ * ones, and a generic string leaves whoever is on call with nothing to act on.
  *
  * Everything else stays opaque on purpose — a raw Postgres error names tables,
  * columns and constraints, which is nothing the client should see.
@@ -882,7 +880,7 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     }
 
     // ---- /api/export/daily -------------------------------------------------
-    // The 18:00 IST write to Google Sheets. Reachable two ways: Vercel Cron,
+    // The 18:00 IST write to Google Sheets. Reachable two ways: a scheduler,
     // which presents CRON_SECRET, and a person pressing "Run now" in Settings,
     // who presents the admin passcode. Never open — it writes to a document
     // outside this app.

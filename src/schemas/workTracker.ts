@@ -1,7 +1,7 @@
 // Validation for the Work Tracker, shared by the API and the inline editors.
 //
 // Relative `.js` specifiers rather than the `@/` alias: this file is pulled
-// into the Vercel function bundle, which resolves it outside Vite.
+// into the server bundle, which resolves it outside Vite.
 
 import { z } from 'zod';
 

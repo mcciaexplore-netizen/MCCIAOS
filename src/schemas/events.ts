@@ -2,7 +2,7 @@
 // (server/handlers.ts) and the forms, exactly as ./index.ts is.
 //
 // Imports here use relative `.js` specifiers rather than the `@/` alias for the
-// same reason the sibling module does: this file is pulled into the Vercel
+// same reason the sibling module does: this file is pulled into the server
 // function bundle, which resolves it outside Vite.
 
 import { z } from 'zod';
