@@ -79,7 +79,7 @@ export const ORG_SECTIONS: Section[] = [
     blurb: 'How the Work Tracker behaves.',
     fields: [
       { key: 'atRiskDays', label: 'At-risk window (days)', kind: 'number', half: true, min: 1, max: 30, help: 'A deadline this many days away or nearer counts as at risk.' },
-      { key: 'dailyExportTime', label: 'Daily export time', kind: 'time', half: true, help: 'IST. Recorded here; nothing schedules it automatically.' },
+      { key: 'dailyExportTime', label: 'Daily export time', kind: 'time', half: true, help: 'IST. The scheduled run is fixed at 18:00 by the cron in vercel.json — changing this records your intent but does not move it.' },
       { key: 'dailyExportEnabled', label: 'Run the daily export to Google Sheets', kind: 'toggle' },
     ],
   },

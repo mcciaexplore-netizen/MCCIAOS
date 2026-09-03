@@ -447,9 +447,24 @@ account:
    Without this every call returns 403, and the error says so by name.
 4. Put the four variables in the environment wherever the app runs.
 
-**There is no schedule.** The export runs when somebody presses **Run now** in
-Settings, or when `POST /api/export/daily` is called with `CRON_SECRET`. Nothing
-fires it automatically — there is no deployment target and no cron.
+**The schedule.** `vercel.json` declares a cron at `30 12 * * *` — 12:30 UTC,
+which is 18:00 IST. Vercel Cron issues a **GET** carrying
+`Authorization: Bearer $CRON_SECRET`, so `CRON_SECRET` must be set in the Vercel
+project or the run is refused. A GET without that secret is answered 405, so the
+path cannot be fired by being linked to, prefetched or crawled.
+
+The **Run the daily export** toggle in Settings stops the scheduled run. Pressing
+**Run now** ignores it: someone who has just asked for an export has said what
+they want. The **daily export time** field records intent only — the hour is
+fixed by the cron expression above, and moving it means editing `vercel.json`.
+
+Crons run only on a deployed Vercel project, never on `npm run dev`. To test the
+scheduled path locally, call it the way Vercel does:
+
+```bash
+curl -X GET http://localhost:5173/api/export/daily \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
 
 
 ## Settings and admin access

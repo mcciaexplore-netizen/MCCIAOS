@@ -898,16 +898,30 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     // who presents the admin passcode. Never open — it writes to a document
     // outside this app.
     if (pathname === '/api/export/daily') {
-      if (method !== 'POST') return json(405, { error: 'Method not allowed' });
       const secret = process.env.CRON_SECRET?.trim();
       const presented =
         req.headers['x-cron-secret'] ??
         (req.headers['authorization'] ?? '').replace(/^Bearer\s+/i, '');
       const byCron = Boolean(secret) && presented === secret;
+
+      // Vercel Cron issues a GET, so the scheduled run cannot be a POST. GET is
+      // accepted only when the cron secret is presented; a plain GET to this
+      // path still gets 405, so nothing writes to the team's spreadsheet by
+      // being linked to, prefetched or crawled.
+      if (method !== 'POST' && !(method === 'GET' && byCron)) {
+        return json(405, { error: 'Method not allowed' });
+      }
       if (secret && !byCron) {
         return json(403, {
           error: 'The daily export needs the admin passcode, or the cron secret.',
         });
+      }
+
+      // The Settings toggle has to actually stop the scheduled run, or it is a
+      // switch wired to nothing. Someone pressing "Run now" has just said what
+      // they want, so a manual request is honoured either way.
+      if (byCron && !(await getOrgSettings()).dailyExportEnabled) {
+        return json(200, { skipped: 'The daily export is switched off in Settings.' });
       }
       try {
         const force = query.get('force') === 'true';
