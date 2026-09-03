@@ -51,7 +51,6 @@ const taskFields = z.object({
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   status: z.enum(TASK_STATUSES).default('upcoming'),
   allocationDate: nullableDate,
-  dueDate: nullableDate,
   deadlineDate: nullableDate,
   reportTo: uuid.nullable().optional(),
   approverId: uuid.nullable().optional(),
@@ -60,13 +59,6 @@ const taskFields = z.object({
 
 type TaskFields = Partial<z.infer<typeof taskFields>>;
 
-/**
- * No ordering rule between dueDate and deadlineDate. They are independent: the
- * due date is a working target that moves, the deadline is the fixed
- * commitment, and a due date past the deadline is precisely how a task reports
- * that it is going to be late. Requiring deadline >= due made that unsayable
- * and refused ordinary edits mid-correction.
- */
 export const taskSchema = taskFields;
 
 /**

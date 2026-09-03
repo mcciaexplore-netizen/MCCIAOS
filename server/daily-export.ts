@@ -23,7 +23,6 @@ const HEADER = [
   'Priority',
   'Status',
   'Allocation',
-  'Due',
   'Deadline',
   'Percentage',
   'Due days',
@@ -39,7 +38,6 @@ function row(day: string, t: Task): (string | number | null)[] {
     t.priority,
     t.status,
     t.allocationDate ?? '',
-    t.dueDate ?? '',
     t.deadlineDate ?? '',
     // Empty rather than 0: a task nobody has put a figure on should keep
     // saying nothing once it reaches the sheet.
@@ -81,7 +79,6 @@ const FIELD_LABELS: Record<string, string> = {
   priority: 'Priority',
   status: 'Status',
   allocationDate: 'Allocation date',
-  dueDate: 'Due date',
   deadlineDate: 'Deadline',
   percentage: 'Percentage',
   reportTo: 'Reports to',

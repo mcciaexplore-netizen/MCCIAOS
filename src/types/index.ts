@@ -239,8 +239,7 @@ export interface Task {
   /** YYYY-MM-DD. When the work was given out. */
   allocationDate: string | null;
   /** YYYY-MM-DD. Working target. */
-  dueDate: string | null;
-  /** YYYY-MM-DD. Hard limit; never earlier than dueDate. */
+  /** YYYY-MM-DD. The date the work is late after. */
   deadlineDate: string | null;
 
   /**
@@ -280,11 +279,8 @@ export interface Task {
   /** Days past the deadline, counting the deadline day from 17:00 IST. 0 when not late. */
   dueDays: number;
   /** Past the working target but still inside the deadline. */
-  hasSlipped: boolean;
   /** The hard limit has passed and the work is not finished. */
   pastDeadline: boolean;
-  /** Whole days until dueDate; negative when past. Null with no due date. */
-  daysLeft: number | null;
 }
 
 /** One change to one field, for the activity trail. */

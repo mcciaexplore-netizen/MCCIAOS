@@ -77,7 +77,6 @@ const COLUMNS = [
   { key: 'priority', label: 'Priority', width: 94, sticky: false, flex: false, sort: '' },
   { key: 'status', label: 'Status', width: 111, sticky: false, flex: false, sort: '' },
   { key: 'allocation', label: 'Allocation', width: 80, sticky: false, flex: false, sort: 'allocation' },
-  { key: 'due', label: 'Due', width: 130, sticky: false, flex: false, sort: 'due' },
   { key: 'deadline', label: 'Deadline', width: 130, sticky: false, flex: false, sort: 'deadline' },
   { key: 'percentage', label: 'Percentage', width: 92, sticky: false, flex: false, sort: '' },
   { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
@@ -1138,26 +1137,10 @@ function TaskRow({
         </td>
       )}
 
-      {visible('due') && (
-        <td {...td('dueDate')}>
-          <EditableDate
-            value={task.dueDate}
-            // Red only when there is no deadline behind it, because then the
-            // due date is the hard limit. A slipped target is amber.
-            overdue={task.isOverdue && !task.deadlineDate}
-            slipped={task.hasSlipped}
-            ariaLabel={`Due date of ${task.title}`}
-            onSave={(v) => onSave(task.id, 'dueDate', v)}
-            {...cell('dueDate')}
-          />
-        </td>
-      )}
-
       {visible('deadline') && (
         <td {...td('deadlineDate')}>
           <EditableDate
             value={task.deadlineDate}
-            min={task.dueDate ?? undefined}
             overdue={task.pastDeadline}
             bold={task.pastDeadline}
             ariaLabel={`Deadline of ${task.title}`}
@@ -1362,7 +1345,6 @@ function NewTaskRow({
     title: string;
     priority: TaskPriority;
     status: TaskStatus;
-    dueDate?: string | null;
     deadlineDate?: string | null;
     reportTo?: string | null;
     approverId?: string | null;
@@ -1382,7 +1364,6 @@ function NewTaskRow({
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [statusValue, setStatusValue] = useState<TaskStatus>('upcoming');
-  const [dueDate, setDueDate] = useState('');
   const [deadlineDate, setDeadlineDate] = useState('');
   const [reportTo, setReportTo] = useState('');
   const [approverId, setApproverId] = useState('');
@@ -1412,7 +1393,6 @@ function NewTaskRow({
       title: title.trim(),
       priority,
       status: statusValue,
-      dueDate: dueDate || null,
       deadlineDate: deadlineDate || null,
       reportTo: reportTo || null,
       approverId: approverId || null,
@@ -1583,11 +1563,6 @@ function NewTaskRow({
         {visible('allocation') && (
           <td className="px-2 text-xs text-slate-400">{formatJiraDate(istToday())}</td>
         )}
-        {visible('due') && (
-          <td>
-            <RowInput type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} aria-label="Due date" />
-          </td>
-        )}
         {visible('deadline') && (
           <td>
             <RowInput
@@ -1711,21 +1686,6 @@ function MobileCard({
           <dt className="text-slate-400">Allocated</dt>
           <dd className="tabular-nums text-slate-600 dark:text-slate-300">
             {task.allocationDate ? formatJiraDate(task.allocationDate) : '—'}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-slate-400">Due</dt>
-          <dd
-            className={cn(
-              'tabular-nums',
-              task.isOverdue && !task.deadlineDate
-                ? 'text-rose-600'
-                : task.hasSlipped
-                  ? 'text-amber-600'
-                  : 'text-slate-600 dark:text-slate-300',
-            )}
-          >
-            {task.dueDate ? formatJiraDate(task.dueDate) : '—'}
           </dd>
         </div>
         <div>

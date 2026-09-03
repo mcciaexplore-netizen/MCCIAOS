@@ -545,7 +545,6 @@ export function EditableDate({
   disabled,
   min,
   overdue,
-  slipped,
   bold,
   ariaLabel,
 }: CellProps & {
@@ -555,7 +554,6 @@ export function EditableDate({
   /** The date that made this task late. Red. */
   overdue?: boolean;
   /** Working target passed, deadline still ahead. Amber, not red. */
-  slipped?: boolean;
   /** A blown hard deadline reads red and bold, per the spec. */
   bold?: boolean;
   ariaLabel: string;
@@ -602,7 +600,7 @@ export function EditableDate({
           if (e.key === 'Enter') setEditing(true);
         }}
         style={{
-          color: overdue ? 'var(--r400)' : slipped ? 'var(--y400)' : 'var(--n200)',
+          color: overdue ? 'var(--r400)' : 'var(--n200)',
           fontWeight: bold ? 600 : undefined,
         }}
         className={cn(cellBase, 'tabular-nums')}

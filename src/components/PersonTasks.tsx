@@ -139,7 +139,6 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
             <th style={{ width: 94 }}>Priority</th>
             <th style={{ width: 111 }}>Status</th>
             <th style={{ width: 114 }}>Allocation</th>
-            <th style={{ width: 114 }}>Due</th>
             <th style={{ width: 114 }}>Deadline</th>
             <th style={{ width: 84 }}>%</th>
             <th style={{ width: 132 }}>Reports to</th>
@@ -191,18 +190,7 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
               </td>
               <td>
                 <EditableDate
-                  value={t.dueDate}
-                  overdue={t.isOverdue && !t.deadlineDate}
-                  slipped={t.hasSlipped}
-                  ariaLabel={`Due date of ${t.title}`}
-                  onSave={(v) => save(t.id, 'dueDate', v)}
-                  {...cell(t.id, 'dueDate')}
-                />
-              </td>
-              <td>
-                <EditableDate
                   value={t.deadlineDate}
-                  min={t.dueDate ?? undefined}
                   overdue={t.pastDeadline}
                   bold={t.pastDeadline}
                   ariaLabel={`Deadline of ${t.title}`}

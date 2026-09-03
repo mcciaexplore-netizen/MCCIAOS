@@ -28,7 +28,7 @@ function cellToString(value: unknown): string {
   if (value == null) return '';
   if (value instanceof Date) {
     // Date-typed cells must survive as the ISO day the app stores, not as a
-    // locale string — `dueDate` is compared and sorted as text elsewhere.
+    // locale string — dates are compared and sorted as text elsewhere.
     //
     // Excel stores a date as a timezone-less serial number, and the parser
     // hands it back as UTC midnight for that day. Reading UTC parts is

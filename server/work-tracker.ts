@@ -60,13 +60,16 @@ const TODAY = `(now() at time zone 'Asia/Kolkata')::date`;
 const OPEN = `('upcoming','ongoing','hold')`;
 
 /**
- * The date that decides whether work is late.
+ * The date that decides whether work is late: the deadline, and only the
+ * deadline.
  *
- * `due_date` is the working target and `deadline_date` is the hard limit, so
- * missing the target is not yet a failure — only blowing the deadline is. A row
- * with no deadline falls back to its due date, otherwise it could never be late.
+ * A working "due date" used to sit alongside it, and this fell back to that
+ * when no deadline was set. With the due date gone, work carrying no deadline
+ * cannot be late at all — there is nothing for it to be late against. That is
+ * deliberate: inventing a limit for a task nobody set one on would manufacture
+ * failures out of missing data.
  */
-const LATE_DATE = `coalesce(t.deadline_date, t.due_date)`;
+const LATE_DATE = `t.deadline_date`;
 
 /**
  * 17:00 IST — the point in the day after which unfinished work has missed
@@ -138,7 +141,6 @@ interface TaskRow {
   percentage: number | null;
   members: { id: string; name: string; colour: string | null }[] | null;
   allocation_date: string | null;
-  due_date: string | null;
   deadline_date: string | null;
   report_to: string | null;
   report_to_name: string | null;
@@ -150,9 +152,7 @@ interface TaskRow {
   updated_at: string | Date;
   is_overdue: boolean;
   due_days: number;
-  has_slipped: boolean;
   past_deadline: boolean;
-  days_left: number | null;
 }
 
 // Dates are rendered to text in Postgres rather than left to the driver's type
@@ -170,21 +170,17 @@ const TASK_COLUMNS = `
      where m.task_id = t.id
   ), '[]'::json) as members,
   to_char(t.allocation_date, 'YYYY-MM-DD') as allocation_date,
-  to_char(t.due_date,        'YYYY-MM-DD') as due_date,
   to_char(t.deadline_date,   'YYYY-MM-DD') as deadline_date,
   t.report_to,   ur.name as report_to_name,
   t.approver_id, ua.name as approver_name,
   t.completed_at, t.approved_at, t.created_at, t.updated_at,
   ${IS_OVERDUE}                                               as is_overdue,
   ${DUE_DAYS}::int                                            as due_days,
-  -- Past the working target but still inside the deadline. Without this the
-  -- deadline-based overdue rule would leave a slipped target with no signal.
-  (t.due_date is not null and t.due_date < ${TODAY}
-    and (${LATE_DATE} is null or ${LATE_DATE} >= ${TODAY})
-    and t.status in ${OPEN})                                  as has_slipped,
+  -- No "slipped" state any more. It meant "past the working target but still
+  -- inside the deadline", and with no working target there is nothing left
+  -- between on-time and late.
   (t.deadline_date is not null and t.deadline_date < ${TODAY}
-    and t.status <> 'completed')                              as past_deadline,
-  (t.due_date - ${TODAY})                                     as days_left
+    and t.status <> 'completed')                              as past_deadline
 `;
 
 const TASK_JOINS = `
@@ -205,7 +201,6 @@ function toTask(row: TaskRow): Task {
     percentage: row.percentage,
     members: row.members ?? [],
     allocationDate: row.allocation_date,
-    dueDate: row.due_date,
     deadlineDate: row.deadline_date,
     reportTo: row.report_to,
     reportToName: row.report_to_name,
@@ -217,9 +212,7 @@ function toTask(row: TaskRow): Task {
     updatedAt: iso(row.updated_at) as string,
     isOverdue: Boolean(row.is_overdue),
     dueDays: Number(row.due_days ?? 0),
-    hasSlipped: Boolean(row.has_slipped),
     pastDeadline: Boolean(row.past_deadline),
-    daysLeft: row.days_left == null ? null : Number(row.days_left),
   };
 }
 
@@ -301,7 +294,6 @@ const SORTABLE: Record<string, string> = {
   name: 'lower(uo.name)',
   title: 'lower(t.title)',
   allocation: 't.allocation_date',
-  due: 't.due_date',
   deadline: 't.deadline_date',
 };
 
@@ -346,8 +338,8 @@ export async function listTasks(filters: TaskFilters): Promise<Task[]> {
   const order = col
     ? `order by ${col} ${dir} nulls last, t.created_at desc`
     : `order by
-         case when t.due_date is null then 1 else 0 end,
-         t.due_date asc,
+         case when t.deadline_date is null then 1 else 0 end,
+         t.deadline_date asc,
          case t.priority when 'high' then 0 when 'medium' then 1 else 2 end,
          t.created_at desc`;
 
@@ -492,7 +484,7 @@ export async function getToday(user?: string | null): Promise<TodayCounts> {
   const rows = (await db.query(
     `select
        to_char(${TODAY}, 'YYYY-MM-DD') as date,
-       count(*) filter (where t.due_date = ${TODAY} and t.status in ${OPEN})::int as due_today,
+       count(*) filter (where t.deadline_date = ${TODAY} and t.status in ${OPEN})::int as due_today,
        count(*) filter (where ${IS_OVERDUE})::int as overdue
      from tasks t
      where ${LIVE} and ($1::uuid is null or ${onTask('$1')})`,
@@ -615,7 +607,6 @@ export interface TaskWriteInput {
   priority: TaskPriority;
   status: TaskStatus;
   allocationDate?: string | null;
-  dueDate?: string | null;
   deadlineDate?: string | null;
   reportTo?: string | null;
   approverId?: string | null;
@@ -664,10 +655,10 @@ export async function createTask(
   // empty cell — it looks decided.
   const rows = (await db.query(
     `insert into tasks
-       (user_id, title, priority, status, allocation_date, due_date,
+       (user_id, title, priority, status, allocation_date,
         deadline_date, report_to, approver_id, percentage, completed_at)
      values ($1::uuid, $2, $3, $4, coalesce($5::date, ${TODAY}), $6::date,
-             $7::date, $8::uuid, $9::uuid, $10::smallint,
+             $7::uuid, $8::uuid, $9::smallint,
              case when $4 = 'completed' then now() end)
      returning id`,
     [
@@ -676,7 +667,6 @@ export async function createTask(
       input.priority,
       input.status,
       input.allocationDate ?? null,
-      input.dueDate ?? null,
       input.deadlineDate ?? null,
       input.reportTo ?? null,
       input.approverId ?? null,
@@ -699,7 +689,6 @@ const PATCHABLE: Record<string, string> = {
   priority: 'priority',
   status: 'status',
   allocationDate: 'allocation_date',
-  dueDate: 'due_date',
   deadlineDate: 'deadline_date',
   reportTo: 'report_to',
   approverId: 'approver_id',
@@ -711,7 +700,6 @@ const CASTS: Record<string, string> = {
   report_to: '::uuid',
   approver_id: '::uuid',
   allocation_date: '::date',
-  due_date: '::date',
   deadline_date: '::date',
   percentage: '::smallint',
 };
