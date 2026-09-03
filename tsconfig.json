@@ -5,9 +5,10 @@
     { "path": "./tsconfig.node.json" }
   ],
   // Solution-style config: the referenced projects above do the real work.
-  // The `paths` entry is repeated here so any tool that reads only the root
-  // tsconfig can still resolve the @/ alias — server/handlers.ts pulls in
-  // @/schemas -> @/constants, and without it those imports fail to resolve.
+  // The `paths` entry is repeated here because it is the only tsconfig the
+  // Vercel function builder looks at when bundling api/*.ts, and that bundle
+  // pulls in server/handlers.ts -> @/schemas -> @/constants. Without it the
+  // client build succeeds and the API fails to resolve the alias.
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
