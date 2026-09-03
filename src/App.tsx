@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from '@/components/AppLayout';
 
@@ -20,10 +21,14 @@ function PageFallback() {
   );
 }
 
+// Boundary outside Suspense, and keyed per page below, so a crash on one
+// screen does not stick when you navigate to another.
 const page = (Component: React.ComponentType) => (
-  <Suspense fallback={<PageFallback />}>
-    <Component />
-  </Suspense>
+  <ErrorBoundary>
+    <Suspense fallback={<PageFallback />}>
+      <Component />
+    </Suspense>
+  </ErrorBoundary>
 );
 
 export default function App() {
