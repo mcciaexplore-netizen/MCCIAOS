@@ -691,14 +691,6 @@ export async function updateTask(
   const db = requireSql();
 
   const status = (patch.status ?? existing.status) as TaskStatus;
-  const due = patch.dueDate !== undefined ? patch.dueDate : existing.dueDate;
-  const deadline =
-    patch.deadlineDate !== undefined ? patch.deadlineDate : existing.deadlineDate;
-
-  // Re-checked on the merged row: a one-field PATCH cannot be judged alone.
-  if (due && deadline && deadline < due) {
-    throw new TrackerError('The deadline cannot be earlier than the due date', 422);
-  }
 
   if (patch.userId !== undefined && patch.userId)
     await requireUser(patch.userId, 'assignee');

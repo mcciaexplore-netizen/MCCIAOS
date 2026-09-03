@@ -61,27 +61,19 @@ const taskFields = z.object({
 type TaskFields = Partial<z.infer<typeof taskFields>>;
 
 /**
- * "deadline_date cannot be earlier than due_date". Only judgeable when both are
- * present in the same payload; a partial PATCH is re-checked server-side
- * against the merged row, and Postgres enforces it as a CHECK regardless.
+ * No ordering rule between dueDate and deadlineDate. They are independent: the
+ * due date is a working target that moves, the deadline is the fixed
+ * commitment, and a due date past the deadline is precisely how a task reports
+ * that it is going to be late. Requiring deadline >= due made that unsayable
+ * and refused ordinary edits mid-correction.
  */
-function checkDates(v: TaskFields, ctx: z.RefinementCtx) {
-  if (v.dueDate && v.deadlineDate && v.deadlineDate < v.dueDate) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['deadlineDate'],
-      message: 'The deadline cannot be earlier than the due date',
-    });
-  }
-}
-
-export const taskSchema = taskFields.superRefine(checkDates);
+export const taskSchema = taskFields;
 
 /**
  * PATCH body. Every field optional — inline editing sends one cell at a time,
  * often a single key like `{ "status": "ongoing" }`.
  */
-export const taskUpdateSchema = taskFields.partial().superRefine(checkDates);
+export const taskUpdateSchema = taskFields.partial();
 
 // ---- Team members ---------------------------------------------------------
 

@@ -168,11 +168,9 @@ begin
       check (priority in ('high','medium','low'));
   end if;
 
-  -- "deadline_date cannot be earlier than due_date". Either may be null.
-  if not exists (select 1 from pg_constraint where conname = 'tasks_deadline_after_due') then
-    alter table tasks add constraint tasks_deadline_after_due
-      check (deadline_date is null or due_date is null or deadline_date >= due_date);
-  end if;
+  -- No ordering rule between deadline_date and due_date: they are independent,
+  -- and a due date past the deadline is how a task says it will be late.
+  -- See db/drop-deadline-order.sql.
 
   -- completed_at exists exactly while the task is completed.
   if not exists (select 1 from pg_constraint where conname = 'tasks_completed_at_matches_status') then

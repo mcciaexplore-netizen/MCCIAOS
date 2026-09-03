@@ -1402,10 +1402,6 @@ function NewTaskRow({
       setError('Group work needs at least two people — use New task for one');
       return;
     }
-    if (dueDate && deadlineDate && deadlineDate < dueDate) {
-      setError('The deadline cannot be earlier than the due date');
-      return;
-    }
     if (percentage !== '' && Number(percentage) > 100) {
       setError('Percentage cannot be above 100');
       return;

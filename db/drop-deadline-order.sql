@@ -1,0 +1,16 @@
+-- Deadline and due date are independent.
+--
+-- `tasks_deadline_after_due` insisted deadline_date >= due_date. That reads as
+-- common sense and is not: the two dates answer different questions. The due
+-- date is the working target the person sets for themselves and moves as the
+-- work progresses; the deadline is the fixed commitment. Pushing a due date
+-- past the deadline is exactly how a task announces it is going to be late,
+-- and the constraint made that unsayable — the row simply refused to save.
+--
+-- The rule also blocked ordinary editing. Setting the deadline before the due
+-- date has been corrected, or clearing one of the pair, hit the check on an
+-- intermediate state that was never meant to be final.
+--
+-- Overdue work is already derived at read time from the dates and the status,
+-- so nothing depends on this ordering holding.
+alter table tasks drop constraint if exists tasks_deadline_after_due;
