@@ -54,7 +54,7 @@ import {
   readSession,
   sessionCookie,
 } from './admin-session.js';
-import { getOrgSettings, saveOrgSettings } from './org-settings.js';
+import { getOrgSettings, readOrgSettings, saveOrgSettings } from './org-settings.js';
 import { orgSettingsSchema } from '../src/schemas/orgSettings.js';
 import { runDailyExport } from './daily-export.js';
 import { SheetsError } from './google-sheets.js';
@@ -367,7 +367,14 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   // of it is secret. Writes need the admin session, enforced here rather than
   // by hiding the form — a hidden form is not a permission check.
   if (pathname === '/api/settings/org') {
-    if (method === 'GET') return json(200, { settings: await getOrgSettings() });
+    if (method === 'GET') {
+      // `degraded` is additive: existing readers use `settings` exactly as
+      // before. It says whether these are the stored values or the defaults
+      // returned because the database could not be read — without it, an
+      // outage answered 200 and the app silently wore its default name.
+      const r = await readOrgSettings();
+      return json(200, { settings: r.settings, degraded: r.degraded, reason: r.reason });
+    }
 
     if (method === 'PUT' || method === 'PATCH') {
       // Partial: the page saves one section at a time, so a stale tab cannot

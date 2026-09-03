@@ -40,17 +40,41 @@ const SELECT = (Object.entries(FIELDS) as [keyof OrgSettings, string][])
   .join(', ');
 
 export async function getOrgSettings(): Promise<OrgSettings> {
-  if (!hasSql) return { ...DEFAULT_ORG_SETTINGS };
+  return (await readOrgSettings()).settings;
+}
+
+/**
+ * The settings, and whether they are the real ones.
+ *
+ * Falling back to defaults keeps the app usable when the database is
+ * unreachable — the sidebar renders on every page and must not throw. But
+ * returning them silently made an outage invisible: the app wore its default
+ * name and answered 200, so nothing on screen said the database was down.
+ *
+ * `degraded` says which happened. Callers that do not care ignore it and
+ * behave exactly as before.
+ */
+export async function readOrgSettings(): Promise<{
+  settings: OrgSettings;
+  degraded: boolean;
+  reason?: string;
+}> {
+  if (!hasSql) {
+    return { settings: { ...DEFAULT_ORG_SETTINGS }, degraded: true, reason: 'No database is configured.' };
+  }
   try {
     const db = requireSql();
     const rows = (await db.query(
       `select ${SELECT} from org_settings where id limit 1`,
     )) as Record<string, unknown>[];
-    return withDefaults(rows[0] ?? null);
-  } catch {
-    // Table not migrated yet, or the database is unreachable. Defaults keep the
-    // app usable; the Settings page will report the real error when saving.
-    return { ...DEFAULT_ORG_SETTINGS };
+    return { settings: withDefaults(rows[0] ?? null), degraded: false };
+  } catch (err) {
+    // Unreachable database, or org_settings not migrated yet.
+    return {
+      settings: { ...DEFAULT_ORG_SETTINGS },
+      degraded: true,
+      reason: (err as Error).message,
+    };
   }
 }
 
