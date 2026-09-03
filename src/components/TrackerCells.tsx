@@ -685,3 +685,25 @@ export function ReadOnlyDate({ value }: { value: string | null }) {
     </span>
   );
 }
+
+/**
+ * Days late, counted from 17:00 on the deadline day.
+ *
+ * Read-only: it comes from the deadline and the clock, so there is nothing
+ * here for anyone to fill in or correct. Blank rather than 0 for work that is
+ * on time — a column of zeroes is a wall to read past, a column of blanks is
+ * a list of the problems.
+ */
+export function DueDays({ days }: { days: number }) {
+  if (days <= 0) {
+    return <span className="block px-2 py-1 text-sm text-slate-300 dark:text-slate-600">—</span>;
+  }
+  return (
+    <span
+      className="block px-2 py-1 text-sm font-semibold tabular-nums text-rose-600 dark:text-rose-400"
+      title={`${days} day${days === 1 ? '' : 's'} past the deadline, counting from 17:00 on the deadline day`}
+    >
+      {days}
+    </span>
+  );
+}

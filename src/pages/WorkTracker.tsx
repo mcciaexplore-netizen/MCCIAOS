@@ -31,6 +31,7 @@ import {
   PriorityMark,
   UserCell,
   formatJiraDate,
+  DueDays,
 } from '@/components/TrackerCells';
 import { ConsultationsTable } from '@/components/ConsultationsTable';
 import { TeamOnTask } from '@/components/TeamOnTask';
@@ -78,6 +79,7 @@ const COLUMNS = [
   { key: 'status', label: 'Status', width: 111, sticky: false, flex: false, sort: '' },
   { key: 'allocation', label: 'Allocation', width: 80, sticky: false, flex: false, sort: 'allocation' },
   { key: 'deadline', label: 'Deadline', width: 130, sticky: false, flex: false, sort: 'deadline' },
+  { key: 'due', label: 'Due', width: 70, sticky: false, flex: false, sort: '' },
   { key: 'percentage', label: 'Percentage', width: 92, sticky: false, flex: false, sort: '' },
   { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
   { key: 'approver', label: 'Approver', width: 132, sticky: false, flex: false, sort: '' },
@@ -1150,6 +1152,12 @@ function TaskRow({
         </td>
       )}
 
+      {visible('due') && (
+        <td>
+          <DueDays days={task.dueDays} />
+        </td>
+      )}
+
       {visible('percentage') && (
         <td {...td('percentage')}>
           <EditableNumber
@@ -1699,6 +1707,14 @@ function MobileCard({
             {task.deadlineDate ? formatJiraDate(task.deadlineDate) : '—'}
           </dd>
         </div>
+          {task.dueDays > 0 && (
+            <div>
+              <dt className="text-slate-400">Due</dt>
+              <dd className="tabular-nums font-semibold text-rose-600 dark:text-rose-400">
+                {task.dueDays} day{task.dueDays === 1 ? '' : 's'}
+              </dd>
+            </div>
+          )}
       </dl>
 
       {sheet && (

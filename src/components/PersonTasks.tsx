@@ -9,6 +9,7 @@ import {
   Lozenge,
   PriorityMark,
   UserCell,
+  DueDays,
 } from '@/components/TrackerCells';
 import { useToast } from '@/components/Toast';
 import { trackerApi } from '@/lib/workTrackerApi';
@@ -140,6 +141,7 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
             <th style={{ width: 111 }}>Status</th>
             <th style={{ width: 114 }}>Allocation</th>
             <th style={{ width: 114 }}>Deadline</th>
+            <th style={{ width: 70 }}>Due</th>
             <th style={{ width: 84 }}>%</th>
             <th style={{ width: 132 }}>Reports to</th>
             <th style={{ width: 132 }}>Approver</th>
@@ -198,6 +200,9 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
                   {...cell(t.id, 'deadlineDate')}
                 />
               </td>
+                <td>
+                  <DueDays days={t.dueDays} />
+                </td>
               <td>
                 <EditableNumber
                   value={t.percentage}
