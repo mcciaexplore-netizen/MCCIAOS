@@ -394,15 +394,6 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     return json(405, { error: 'Method not allowed' });
   }
 
-  // ---- /api/settings/unlock (retired) --------------------------------------
-  // Kept so an old tab still open on the previous build gets a clear answer
-  // rather than a 404 it cannot explain.
-  if (pathname === '/api/settings/unlock') {
-    return json(410, {
-      error: 'This app now uses an admin session. Reload the page and sign in again.',
-    });
-  }
-
   // ---- /api/tasks, /api/users, /api/summary, /api/today, /api/shared -----
   // NO SERVER-SIDE ACCESS CONTROL, BY DESIGN. PRD.md:33 — "Not building real
   // authentication, roles, or permissions. This is a trusted-team internal
