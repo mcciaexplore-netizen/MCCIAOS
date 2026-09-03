@@ -33,7 +33,7 @@ import {
   formatJiraDate,
 } from '@/components/TrackerCells';
 import { ConsultationsTable } from '@/components/ConsultationsTable';
-import { TeamOnTask, WorkGroupBlock } from '@/components/TeamOnTask';
+import { TeamOnTask } from '@/components/TeamOnTask';
 import { useToast } from '@/components/Toast';
 import { trackerApi, type TabKey } from '@/lib/workTrackerApi';
 import {
@@ -420,6 +420,8 @@ export default function WorkTracker() {
   useEscape(showColumns, () => setShowColumns(false));
   const [adding, setAdding] = useState(false);
   const [addingConsultation, setAddingConsultation] = useState(false);
+  /** Whether the open new-task row is naming several people rather than one. */
+  const [groupMode, setGroupMode] = useState(false);
   const { unlocked } = useEditLock();
   const [activityFor, setActivityFor] = useState<Task | null>(null);
 
@@ -584,13 +586,7 @@ export default function WorkTracker() {
           {/* Beside the person picker, because it answers the question that
               picker cannot: the table lists a task once, under its owner, so a
               collaborator's involvement is invisible until you open that row. */}
-          {view === 'work' && (
-            <WorkGroupBlock
-              user={user}
-              users={users}
-              onChanged={() => qc.invalidateQueries({ queryKey: ['tasks'] })}
-            />
-          )}
+
           {/* One control, doing both jobs: it narrows the table to one person
               and names who new work is filed under. Left on Everyone the table
               shows the whole team, which is what it opens on. */}
@@ -627,11 +623,36 @@ export default function WorkTracker() {
               size="sm"
               onClick={() => {
                 setAddingConsultation(false);
+                setGroupMode(false);
                 setAdding(true);
               }}
               disabled={users.length === 0}
             >
               <Plus className="h-4 w-4" /> New task
+            </Button>
+          )}
+          {/* Group work: one title, the same fields as any task, but several
+              people on it. The first person named owns it — a task has to
+              belong to somebody for the table to list it — and the rest are
+              recorded as working on it with them. */}
+          {view === 'work' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={users.length < 2}
+              title={
+                users.length < 2
+                  ? 'Group work needs at least two people on the roster'
+                  : 'One title, several people'
+              }
+              onClick={() => {
+                set({ view: '' });
+                setAddingConsultation(false);
+                setGroupMode(true);
+                setAdding(true);
+              }}
+            >
+              <Users2 className="h-4 w-4" /> Group
             </Button>
           )}
           {/* Beside New task, because the two are the same kind of act: putting
@@ -780,13 +801,24 @@ export default function WorkTracker() {
                     <NewTaskRow
                       users={users}
                       visible={visible}
-                      lockedUser={user || undefined}
+                      group={groupMode}
+                      lockedUser={groupMode ? undefined : user || undefined}
                       defaultUser={user || actor || users[0]?.id}
                       pending={create.isPending}
-                      onCancel={() => setAdding(false)}
-                      onCreate={async (input) => {
-                        await create.mutateAsync(input);
+                      onCancel={() => {
                         setAdding(false);
+                        setGroupMode(false);
+                      }}
+                      onCreate={async ({ userIds, ...input }) => {
+                        // The first name owns it; a task has to belong to
+                        // somebody for the table to list it once. The rest are
+                        // recorded as working on it alongside them.
+                        const [owner, ...rest] = userIds;
+                        const made = await create.mutateAsync({ ...input, userId: owner });
+                        if (rest.length) await trackerApi.setMembers(made.task.id, rest);
+                        qc.invalidateQueries({ queryKey: ['tasks'] });
+                        setAdding(false);
+                        setGroupMode(false);
                       }}
                     />
                   )}
@@ -1191,6 +1223,7 @@ function ViewSwitch({ onBack }: { onBack: () => void }) {
 function NewTaskRow({
   users,
   visible,
+  group,
   lockedUser,
   defaultUser,
   pending,
@@ -1199,6 +1232,11 @@ function NewTaskRow({
 }: {
   users: User[];
   visible: (k: ColumnKey) => boolean;
+  /**
+   * Several people on one title rather than one. Everything else about the row
+   * is identical — same fields, same validation, same table.
+   */
+  group?: boolean;
   /**
    * Set when the table is filtered to one person. Their work is the only work
    * this row could be adding, so Name stops being a question and becomes a
@@ -1210,7 +1248,8 @@ function NewTaskRow({
   pending: boolean;
   onCancel: () => void;
   onCreate: (input: {
-    userId: string;
+    /** Everyone on it. The first owns it; the rest work on it with them. */
+    userIds: string[];
     title: string;
     priority: TaskPriority;
     status: TaskStatus;
@@ -1223,6 +1262,11 @@ function NewTaskRow({
 }) {
   const [pickedUser, setPickedUser] = useState(defaultUser ?? users[0]?.id ?? '');
   const userId = lockedUser ?? pickedUser;
+  /** Group mode only: everyone on the work, in the order they were ticked. */
+  const [groupIds, setGroupIds] = useState<string[]>(
+    defaultUser ? [defaultUser] : users[0] ? [users[0].id] : [],
+  );
+  const [namesOpen, setNamesOpen] = useState(false);
   const lockedPerson = lockedUser ? users.find((u) => u.id === lockedUser) : undefined;
   const lockedName = lockedPerson?.name;
   const lockedColour = lockedPerson?.colour;
@@ -1240,8 +1284,13 @@ function NewTaskRow({
   useEffect(() => firstRef.current?.focus(), []);
 
   const commit = async () => {
-    if (!title.trim() || !userId) {
+    const people = group ? groupIds : [userId];
+    if (!title.trim() || people.length === 0) {
       setError('A name and a title are required');
+      return;
+    }
+    if (group && people.length < 2) {
+      setError('Group work needs at least two people — use New task for one');
       return;
     }
     if (dueDate && deadlineDate && deadlineDate < dueDate) {
@@ -1254,7 +1303,7 @@ function NewTaskRow({
     }
     setError(null);
     await onCreate({
-      userId,
+      userIds: people,
       title: title.trim(),
       priority,
       status: statusValue,
@@ -1271,6 +1320,12 @@ function NewTaskRow({
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
+      // Escape closes the name list first. Discarding a half-filled row because
+      // somebody dismissed a dropdown is the wrong thing to do with that key.
+      if (namesOpen) {
+        setNamesOpen(false);
+        return;
+      }
       onCancel();
     }
     if (e.key === 'Enter') {
@@ -1285,8 +1340,75 @@ function NewTaskRow({
     <>
       <tr onKeyDown={onKey} style={{ background: 'var(--b50)' }}>
         {visible('name') && (
-          <td className="sticky z-10" style={{ left: 0, background: 'inherit' }}>
-            {lockedUser ? (
+          <td
+            className="sticky"
+            style={{ left: 0, background: 'inherit', zIndex: namesOpen ? 60 : 10 }}
+          >
+            {group ? (
+              /* Several names, one title. A list of ticks rather than a
+                 multi-select: the roster is short, and a native multiple-select
+                 needs ctrl-click to add a second person, which nobody guesses. */
+              <span className="relative flex min-w-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setNamesOpen((v) => !v)}
+                  aria-expanded={namesOpen}
+                  aria-label="Who is on this work"
+                  className={cn(ROW_CONTROL, 'flex items-center gap-1.5 text-left')}
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {groupIds.length === 0
+                      ? 'Pick people'
+                      : groupIds
+                          .map((id) => users.find((u) => u.id === id)?.name)
+                          .filter(Boolean)
+                          .join(', ')}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                </button>
+                {namesOpen && (
+                  <>
+                    <button
+                      type="button"
+                      aria-hidden
+                      tabIndex={-1}
+                      onClick={() => setNamesOpen(false)}
+                      className="fixed inset-0 z-40 cursor-default"
+                    />
+                    <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-56 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                      {users.map((u) => {
+                        const on = groupIds.includes(u.id);
+                        return (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() =>
+                              setGroupIds((ids) =>
+                                ids.includes(u.id)
+                                  ? ids.filter((x) => x !== u.id)
+                                  : [...ids, u.id],
+                              )
+                            }
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                          >
+                            <Avatar name={u.name} colour={u.colour} size={20} />
+                            <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200">
+                              {u.name}
+                              {/* The first ticked owns it, so say so rather than
+                                  leaving the order to look arbitrary. */}
+                              {groupIds[0] === u.id && (
+                                <span className="ml-1 text-[11px] text-slate-400">owner</span>
+                              )}
+                            </span>
+                            {on && <Check className="h-4 w-4 shrink-0 text-brand-600" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </span>
+            ) : lockedUser ? (
               <span className="flex min-w-0 items-center gap-1.5 px-2">
                 <Avatar name={lockedName ?? ''} colour={lockedColour} size={24} />
                 <span

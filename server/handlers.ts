@@ -98,46 +98,6 @@ import {
   type SheetName,
 } from './store.js';
 
-/** The one admin passcode. Never sent to the client; only ever compared here. */
-
-/**
- * Whether a request carries the admin passcode.
- *
- * Recorded work is frozen once it holds a value, and the freeze is enforced
- * here rather than by hiding controls on the page: a check that lives only in
- * the browser is a suggestion, and one PATCH sent from anywhere else would walk
- * straight past it.
- *
- * This is a permission check, not a login. Everyone shares one passcode, so all
- * it establishes is that whoever sent this knew it — never who they were.
- */
-/** Task field names as they read in the refusal message. */
-function FIELD_LABELS(field: string): string {
-  const named: Record<string, string> = {
-    userId: 'The person',
-    title: 'The title',
-    priority: 'The priority',
-    status: 'The status',
-    allocationDate: 'The allocation date',
-    dueDate: 'The due date',
-    deadlineDate: 'The deadline',
-    reportTo: 'Reports to',
-    approverId: 'The approver',
-  };
-  return named[field] ?? field;
-}
-
-/**
- * Retired. Every route is open again, by request.
- *
- * Kept as a single named function rather than deleting the call sites, so the
- * places that used to require an administrator are still visible in the code —
- * and so restoring the check is one line here rather than seven scattered ones.
- */
-function holdsPasscode(_req: ApiRequest): boolean {
-  return true;
-}
-
 export interface ApiRequest {
   method: string;
   pathname: string;
@@ -445,6 +405,17 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   }
 
   // ---- /api/tasks, /api/users, /api/summary, /api/today, /api/shared -----
+  // NO SERVER-SIDE ACCESS CONTROL, BY DESIGN. PRD.md:33 — "Not building real
+  // authentication, roles, or permissions. This is a trusted-team internal
+  // tool." TRD.md:42 requires real authentication to be *removed*, and TRD.md:76
+  // keeps `users` as a name list whose "role as an access gate is removed".
+  //
+  // A stub named holdsPasscode() used to sit in front of five of these routes
+  // returning true unconditionally. It was deleted rather than left in place:
+  // code that looks like a permission check and is not is worse than no check,
+  // because the next reader trusts it.
+  //
+  // The Settings password gates that *screen*, not this API.
   // ACCESS CONTROL: the module spec asks that only a task's approver may set
   // `approved`. There is no session, so "who is acting" arrives as the
   // `actor` parameter — the person selected in the header's Viewing block.
@@ -894,12 +865,6 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
             error: 'Name whose work to clear, with ?user=<id>. There is no clear-all.',
           });
         }
-        if (!holdsPasscode(req)) {
-          return json(403, {
-            error: 'Clearing somebody\u2019s work needs the admin passcode.',
-            locked: ['tasks'],
-          });
-        }
         const removed = await deleteTasksForUser(target, actor);
         return json(200, { removed });
       }
@@ -910,9 +875,6 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     // Undo for the bulk clear above.
     if (pathname === '/api/tasks/restore-bulk') {
       if (method !== 'POST') return json(405, { error: 'Method not allowed' });
-      if (!holdsPasscode(req)) {
-        return json(403, { error: 'Restoring work needs the admin passcode.' });
-      }
       const body = (req.body ?? {}) as { user?: unknown; since?: unknown };
       const target = typeof body.user === 'string' ? body.user : '';
       const since = typeof body.since === 'string' ? new Date(body.since) : null;
@@ -1045,12 +1007,6 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
 
       if (sub === 'restore') {
         if (method !== 'POST') return json(405, { error: 'Method not allowed' });
-        if (!holdsPasscode(req)) {
-          return json(403, {
-            error: 'Restoring removed work needs the admin passcode.',
-            locked: ['task'],
-          });
-        }
         const task = await restoreTask(id, actor);
         if (!task) return json(404, { error: 'Not found, or it was never removed' });
         return json(200, { task });
@@ -1075,30 +1031,6 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
         if (!parsed.success)
           return json(422, { error: 'Validation failed', issues: parsed.error.issues });
 
-        // A field that is already filled is frozen: overwriting what somebody
-        // recorded needs the passcode. A field that is still empty does not —
-        // filling in a blank adds information, it does not revise a record, and
-        // making people unlock to enter a missing due date would only teach
-        // them to leave the app unlocked.
-        if (!holdsPasscode(req)) {
-          const before = await getTask(id);
-          if (!before) return json(404, { error: 'Not found' });
-          const filled = Object.keys(parsed.data).filter((f) => {
-            const current = (before as unknown as Record<string, unknown>)[f];
-            return current !== null && current !== undefined && current !== '';
-          });
-          if (filled.length > 0) {
-            return json(403, {
-              error: `${filled.map(FIELD_LABELS).join(' and ')} ${
-                filled.length > 1 ? 'are' : 'is'
-              } already recorded. Unlock with the admin passcode to change ${
-                filled.length > 1 ? 'them' : 'it'
-              }.`,
-              locked: filled,
-            });
-          }
-        }
-
         const task = await updateTask(id, parsed.data, actor);
         if (!task) return json(404, { error: 'Not found' });
         // The full row goes back so the client can reconcile server-set fields
@@ -1107,12 +1039,6 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
       }
       if (method === 'DELETE') {
         // Deleting is the largest edit there is; it always needs the passcode.
-        if (!holdsPasscode(req)) {
-          return json(403, {
-            error: 'Deleting recorded work needs the admin passcode.',
-            locked: ['task'],
-          });
-        }
         const ok = await deleteTask(id, actor);
         if (!ok) return json(404, { error: 'Not found' });
         return json(200, { success: true });
