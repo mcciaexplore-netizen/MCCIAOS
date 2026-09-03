@@ -64,6 +64,7 @@ import {
   getTabCounts,
   getTask,
   getToday,
+  getWorkStaleness,
   listTasks,
   listUsers,
   updateTask,
@@ -425,6 +426,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     pathname === '/api/export/daily' ||
     pathname === '/api/summary' ||
     pathname === '/api/today' ||
+    pathname === '/api/staleness' ||
     pathname === '/api/at-risk'
   ) {
     return handleWorkTracker(req);
@@ -803,6 +805,17 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     if (pathname === '/api/today') {
       if (method !== 'GET') return json(405, { error: 'Method not allowed' });
       return json(200, await getToday(query.get('user')));
+    }
+
+    if (pathname === '/api/staleness') {
+      if (method !== 'GET') return json(405, { error: 'Method not allowed' });
+      const raw = Number(query.get('afterDays') ?? 1);
+      const staleAfterDays = Number.isInteger(raw) ? raw : 1;
+      const threshold = Math.min(30, Math.max(0, staleAfterDays));
+      return json(200, {
+        staleAfterDays: threshold,
+        people: await getWorkStaleness(threshold),
+      });
     }
 
     if (pathname === '/api/at-risk') {

@@ -48,6 +48,7 @@ import { useEditLock } from '@/hooks/useEditLock';
 import { useSettingsGate } from '@/hooks/useSettingsGate';
 import { enter as enterSettings, leave as leaveSettings } from '@/lib/settingsPassword';
 import { trackerApi } from '@/lib/workTrackerApi';
+import { readTrackerActor } from '@/lib/trackerIdentity';
 import type { UserInput, UserUpdateInput } from '@/schemas/workTracker';
 import { cn } from '@/lib/utils';
 import type { AppSettings, SheetName, TonedOption, User } from '@/types';
@@ -776,6 +777,7 @@ function WorkTrackerAdmin() {
   const { toast } = useToast();
   const { unlocked, setUnlocked } = useEditLock();
   const [confirming, setConfirming] = useState<string | null>(null);
+  const actor = readTrackerActor();
   /** Whose task list is open. One at a time: two long tables at once is a wall. */
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -795,11 +797,12 @@ function WorkTrackerAdmin() {
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['task-counts'] });
     qc.invalidateQueries({ queryKey: ['tasks'] });
+    qc.invalidateQueries({ queryKey: ['tracker-staleness'] });
   };
 
   const restore = useMutation({
     mutationFn: ({ id, since }: { id: string; since: string }) =>
-      trackerApi.restoreTasksFor(id, since),
+      trackerApi.restoreTasksFor(id, since, actor),
     onSuccess: (r) => {
       refresh();
       toast(`Put back ${r.restored} task${r.restored === 1 ? '' : 's'}`);
@@ -815,7 +818,9 @@ function WorkTrackerAdmin() {
     mutationFn: (force: boolean) => trackerApi.runDailyExport(force),
     onSuccess: (r) => {
       setExportResult(r);
-      toast(`Wrote ${r.written} row${r.written === 1 ? '' : 's'} to the sheet`);
+      toast(
+        `Wrote ${r.written} work row${r.written === 1 ? '' : 's'} and ${r.log.changes} change${r.log.changes === 1 ? '' : 's'} to the sheet`,
+      );
     },
     onError: (err: Error) => {
       setExportResult(null);
@@ -824,7 +829,7 @@ function WorkTrackerAdmin() {
   });
 
   const clear = useMutation({
-    mutationFn: (id: string) => trackerApi.clearTasksFor(id),
+    mutationFn: (id: string) => trackerApi.clearTasksFor(id, actor),
     onSuccess: (r, id) => {
       // Captured before the request so the undo has a window to match on. The
       // bulk clear hides rather than destroys, so this is a real undo.
@@ -853,8 +858,8 @@ function WorkTrackerAdmin() {
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               {unlocked
-                ? 'Unlocked. Any filled field on the Work Tracker can be changed, and tasks can be deleted.'
-                : 'Locked. A field that already holds a value is read-only, and tasks cannot be deleted.'}
+                ? 'Unlocked. Commitments can be revised and tasks can be deleted.'
+                : 'Locked. Filled commitments are read-only. Status, progress, priority and working due dates remain editable.'}
             </p>
             <p className="mt-2 text-xs text-slate-400">
               A guard against accidents, not a permission check — anyone using the
@@ -885,9 +890,8 @@ function WorkTrackerAdmin() {
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Every evening at 18:00 IST each person&rsquo;s work is appended to
-              their own tab, creating the tab if it does not exist yet. Running
-              it again on a day already written changes nothing, so pressing this
-              after the scheduled run is safe.
+              their own tab, and every old→new task update is synced to the shared
+              Change Log tab. Repeating the export does not duplicate log entries.
             </p>
           </div>
           <Button
@@ -912,6 +916,8 @@ function WorkTrackerAdmin() {
               {exportResult.day}: {exportResult.written} row
               {exportResult.written === 1 ? '' : 's'} written
               {exportResult.skipped > 0 && `, ${exportResult.skipped} skipped`}
+              {`; ${exportResult.log.changes} change${exportResult.log.changes === 1 ? '' : 's'} added to Change Log`}
+              {exportResult.log.skipped && ` (${exportResult.log.skipped})`}
             </p>
             <ul className="mt-1 space-y-0.5 text-slate-500 dark:text-slate-400">
               {exportResult.people.map((p) => (

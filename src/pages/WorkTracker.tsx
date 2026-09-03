@@ -41,11 +41,13 @@ import {
   TASK_PRIORITY_LABELS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
+  isCommitmentField,
 } from '@/constants';
 import { useEditLock } from '@/hooks/useEditLock';
 import { istToday } from '@/lib/ist';
+import { readTrackerActor, writeTrackerActor } from '@/lib/trackerIdentity';
 import { cn } from '@/lib/utils';
-import type { Task, TaskPriority, TaskStatus, User } from '@/types';
+import type { Task, TaskPriority, TaskStatus, User, WorkStaleness } from '@/types';
 
 // DESIGN NOTE. The table is Atlassian/Jira anatomy: Jira neutrals, 32px rows,
 // filled lozenges, a border-bottom and no colour bar. Those tokens are scoped
@@ -89,10 +91,95 @@ type ColumnKey = (typeof COLUMNS)[number]['key'];
 const COLUMN_PREF_KEY = 'mccia.tracker.columns';
 // Whose work is on screen, remembered so each person lands on their own list.
 const PERSON_PREF_KEY = 'mccia.tracker.person';
-// Who the app is acting as. Follows the person selector, but survives a switch
-// back to Everyone — an approver signs off other people's work, so they must be
-// able to see the whole team and still be themselves.
-const ACTOR_PREF_KEY = 'mccia.tracker.actor';
+function freshnessLabel(person: WorkStaleness): string {
+  if (person.openCount === 0) return 'No open work';
+  if (person.daysSinceUpdate === null) return 'No identified update';
+  if (person.daysSinceUpdate === 0) return 'Updated today';
+  if (person.daysSinceUpdate === 1) return 'Updated yesterday';
+  return `${person.daysSinceUpdate} days since update`;
+}
+
+/** The daily stand-up view: workload and identified update freshness together. */
+function TeamFreshness({
+  people,
+  staleAfterDays,
+  selected,
+  loading,
+  error,
+  onSelect,
+}: {
+  people: WorkStaleness[];
+  staleAfterDays: number;
+  selected: string;
+  loading: boolean;
+  error?: string;
+  onSelect: (userId: string) => void;
+}) {
+  return (
+    <Card className="mb-3 p-3">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            Team freshness
+          </p>
+          <p className="text-xs text-slate-400">
+            Open work and last self-identified update. Red after more than {staleAfterDays}{' '}
+            day{staleAfterDays === 1 ? '' : 's'}.
+          </p>
+        </div>
+        <span className="text-[11px] text-slate-400">Identity comes from the person selector</span>
+      </div>
+
+      {loading ? (
+        <p className="py-2 text-xs text-slate-400">Checking team updates…</p>
+      ) : error ? (
+        <p className="py-2 text-xs text-rose-600 dark:text-rose-400">
+          Could not load team freshness: {error}
+        </p>
+      ) : people.length === 0 ? (
+        <p className="py-2 text-xs text-slate-400">No active people to show.</p>
+      ) : (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {people.map((person) => {
+            const today = person.openCount > 0 && person.daysSinceUpdate === 0;
+            const waiting =
+              person.openCount > 0 && person.daysSinceUpdate !== null && !today && !person.isStale;
+            return (
+              <button
+                key={person.userId}
+                type="button"
+                onClick={() => onSelect(person.userId)}
+                title={
+                  person.lastUpdateAt
+                    ? `${person.userName}'s last identified update: ${new Date(person.lastUpdateAt).toLocaleString('en-IN')}`
+                    : `${person.userName} has no identified update on their current open work`
+                }
+                className={cn(
+                  'min-w-40 rounded-lg border px-3 py-2 text-left transition-colors',
+                  person.isStale
+                    ? 'border-rose-200 bg-rose-50 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/30'
+                    : today
+                      ? 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/30'
+                      : waiting
+                        ? 'border-amber-200 bg-amber-50 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30'
+                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/60',
+                  selected === person.userId && 'ring-2 ring-brand-500/40',
+                )}
+              >
+                <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                  {person.userName}
+                </span>
+                <span className="mt-0.5 block text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                  {person.openCount} open · {freshnessLabel(person)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 /** Closes a popover on Escape, matching SlideOver and Modal. */
 function useEscape(open: boolean, onClose: () => void) {
@@ -210,11 +297,11 @@ export default function WorkTracker() {
   // keeps the last person: approving is done on somebody else's work, so the
   // approver has to be able to widen the table without stopping being
   // themselves. A label, not a boundary — there is no session behind it.
-  const [actorId, setActorId] = useState<string>(() => readStored(ACTOR_PREF_KEY) ?? '');
+  const [actorId, setActorId] = useState<string>(() => readTrackerActor() ?? '');
   useEffect(() => {
     if (!user) return;
     setActorId(user);
-    writeStored(ACTOR_PREF_KEY, user);
+    writeTrackerActor(user);
   }, [user]);
   const actor = actorId && users.some((u) => u.id === actorId) ? actorId : undefined;
   const actorName = users.find((u) => u.id === actor)?.name;
@@ -235,6 +322,10 @@ export default function WorkTracker() {
   const today = useQuery({
     queryKey: ['tracker-today', user],
     queryFn: () => trackerApi.today(user || undefined),
+  });
+  const staleness = useQuery({
+    queryKey: ['tracker-staleness'],
+    queryFn: () => trackerApi.staleness(1),
   });
   const atRisk = useQuery({
     queryKey: ['tracker-at-risk', user],
@@ -264,6 +355,7 @@ export default function WorkTracker() {
     qc.invalidateQueries({ queryKey: ['tracker-summary'] });
     qc.invalidateQueries({ queryKey: ['tracker-today'] });
     qc.invalidateQueries({ queryKey: ['tracker-at-risk'] });
+    qc.invalidateQueries({ queryKey: ['tracker-staleness'] });
   };
 
   /**
@@ -337,7 +429,7 @@ export default function WorkTracker() {
   });
 
   const remove = useMutation({
-    mutationFn: (id: string) => trackerApi.remove(id),
+    mutationFn: (id: string) => trackerApi.remove(id, actor),
     // Removing hides the row rather than destroying it, so the offer to undo is
     // a real one. It is made here, next to the confirmation, because that is
     // the moment somebody realises they picked the wrong row.
@@ -670,6 +762,17 @@ export default function WorkTracker() {
         </div>
       </div>
 
+      {view === 'work' && (
+        <TeamFreshness
+          people={staleness.data?.people ?? []}
+          staleAfterDays={staleness.data?.staleAfterDays ?? 1}
+          selected={user}
+          loading={staleness.isLoading}
+          error={staleness.isError ? (staleness.error as Error).message : undefined}
+          onSelect={setUser}
+        />
+      )}
+
       {loadError && (
         <div className="mb-4">
           <ErrorState
@@ -815,8 +918,9 @@ export default function WorkTracker() {
                         // recorded as working on it alongside them.
                         const [owner, ...rest] = userIds;
                         const made = await create.mutateAsync({ ...input, userId: owner });
-                        if (rest.length) await trackerApi.setMembers(made.task.id, rest);
+                        if (rest.length) await trackerApi.setMembers(made.task.id, rest, actor);
                         qc.invalidateQueries({ queryKey: ['tasks'] });
+                        qc.invalidateQueries({ queryKey: ['tracker-staleness'] });
                         setAdding(false);
                         setGroupMode(false);
                       }}
@@ -839,6 +943,7 @@ export default function WorkTracker() {
                       onActivity={() => setActivityFor(t)}
                       onMembersChanged={() => {
                         qc.invalidateQueries({ queryKey: ['tasks'] });
+                        qc.invalidateQueries({ queryKey: ['tracker-staleness'] });
                       }}
                       onApprove={() => approve.mutate(t.id)}
                       onDelete={() => {
@@ -915,16 +1020,17 @@ function TaskRow({
   const k = (field: string) => `${task.id}:${field}`;
 
   /**
-   * A field that already holds a value is read-only until the tab is unlocked.
-   * An empty one stays editable: filling in a blank adds information, it does
-   * not revise a record, and making people unlock to enter a missing due date
-   * would only teach them to leave the app unlocked all day.
-   *
-   * The same rule is enforced in the API. This half only decides what the
-   * screen offers; the server is what actually refuses.
+   * A filled commitment field is read-only until the tab is unlocked. An empty
+   * commitment stays editable because filling a gap does not revise an agreed
+   * value. Operational updates stay editable because they are expected to move.
+   * This is an accident guard in the UI, not an API permission boundary.
    */
   const frozen = (field: string) => {
     if (unlocked) return false;
+    // Only the commitment fields. Status, percentage, priority and the due date
+    // stay editable always — they are the daily update, and freezing them was
+    // why nothing had been touched since the day it was entered.
+    if (!isCommitmentField(field)) return false;
     const v = (task as unknown as Record<string, unknown>)[field];
     return v !== null && v !== undefined && v !== '';
   };
@@ -938,7 +1044,10 @@ function TaskRow({
   /** Says why a cell will not open, on the element people actually hover. */
   const td = (field: string) =>
     frozen(field)
-      ? { title: 'Already recorded. Settings \u2192 Work Tracker unlocks editing.' }
+      ? {
+          title:
+            'Agreed when the work was set up. Settings \u2192 Work Tracker unlocks it.',
+        }
       : {};
 
   // Approval is enabled only on completed work, and only for its own approver.
@@ -966,6 +1075,7 @@ function TaskRow({
           <TeamOnTask
             task={task}
             users={users}
+            actor={actor}
             disabled={frozen('userId')}
             onChanged={onMembersChanged}
             onOpenChange={setTeamOpen}

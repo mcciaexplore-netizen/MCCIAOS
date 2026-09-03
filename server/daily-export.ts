@@ -11,7 +11,7 @@
  * double the record. Pass `force` to write anyway, which is what you want after
  * correcting a task late in the day.
  */
-import { listTasks, listUsers } from './work-tracker.js';
+import { listChangesThrough, listTasks, listUsers } from './work-tracker.js';
 import { openSheet, sheetsConfig, SheetsError } from './google-sheets.js';
 import { istDate } from '../src/lib/ist.js';
 import type { Task } from '../src/types/index.js';
@@ -49,12 +49,100 @@ function row(day: string, t: Task): (string | number | null)[] {
   ];
 }
 
+/**
+ * The shared change-log tab: every edit anyone made that day, in one place.
+ *
+ * Separate from the per-person tabs because it answers a different question.
+ * A person's tab says where their work stands tonight; this says what actually
+ * moved today, and who moved it. Reviewing progress needs the second.
+ */
+const LOG_TAB = 'Change Log';
+
+const LOG_HEADER = [
+  'Date',
+  'Time',
+  'Changed by',
+  'Whose work',
+  'Task',
+  'What changed',
+  'From',
+  'To',
+  'Entry ID',
+] as const;
+
+/** Field keys are for code. A report gets the words people use. */
+const FIELD_LABELS: Record<string, string> = {
+  title: 'Title',
+  userId: 'Owner',
+  priority: 'Priority',
+  status: 'Status',
+  allocationDate: 'Allocation date',
+  dueDate: 'Due date',
+  deadlineDate: 'Deadline',
+  percentage: 'Percentage',
+  reportTo: 'Reports to',
+  approverId: 'Approver',
+  members: 'Team',
+  created: 'Created',
+  deleted: 'Removed',
+  restored: 'Restored',
+  approval: 'Approval',
+};
+
+/** The workbook handle `openSheet` hands back. `Sheet` is one tab's properties. */
+type Workbook = Awaited<ReturnType<typeof openSheet>>;
+
+async function writeChangeLog(
+  sheet: Workbook,
+  day: string,
+): Promise<{ changes: number; skipped?: string }> {
+  // Read through today, not only today: if an export was missed, its audit
+  // rows are backfilled the next time instead of disappearing from Sheets.
+  const changes = await listChangesThrough(day);
+  if (changes.length === 0) return { changes: 0, skipped: 'nothing changed' };
+
+  let tab = sheet.find(LOG_TAB);
+  let created = false;
+  if (!tab) {
+    tab = await sheet.createTab(LOG_TAB);
+    created = true;
+  }
+
+  // Unlike the nightly snapshots, this tab is an incremental audit stream.
+  // Stable database ids make a rerun safe while still allowing changes made
+  // after an earlier same-day run to be appended on the next one.
+  const writtenIds = created ? new Set<string>() : new Set(await sheet.columnValues(tab, 'I'));
+  const pending = changes.filter((change) => !writtenIds.has(change.id));
+  if (pending.length === 0) return { changes: 0, skipped: 'up to date' };
+
+  const rows: (string | number | null)[][] = [];
+  if (created || (await sheet.firstRow(tab)).length === 0) rows.push([...LOG_HEADER]);
+  for (const c of pending) {
+    rows.push([
+      c.day,
+      c.at,
+      // Blank, not "Unknown": the actor is genuinely unrecorded on older rows
+      // and inventing a name for a real edit would be worse than a gap.
+      c.actorName ?? '',
+      c.ownerName ?? '',
+      c.title,
+      FIELD_LABELS[c.field] ?? c.field,
+      c.oldValue ?? '',
+      c.newValue ?? '',
+      c.id,
+    ]);
+  }
+  await sheet.append(tab, rows);
+  return { changes: pending.length };
+}
+
 export interface ExportOutcome {
   day: string;
   spreadsheetId: string;
   people: { name: string; tab: string; tasks: number; created: boolean; skipped?: string }[];
   written: number;
   skipped: number;
+  log: { changes: number; skipped?: string };
 }
 
 export async function runDailyExport(
@@ -78,6 +166,7 @@ export async function runDailyExport(
     people: [],
     written: 0,
     skipped: 0,
+    log: { changes: 0 },
   };
 
   for (const person of people) {
@@ -121,6 +210,10 @@ export async function runDailyExport(
     outcome.people.push({ name: person.name, tab, tasks: tasks.length, created });
     outcome.written += tasks.length;
   }
+
+  // After the per-person tabs, so a failure here still leaves everybody's work
+  // recorded rather than losing the whole run to the log.
+  outcome.log = await writeChangeLog(sheet, day);
 
   return outcome;
 }

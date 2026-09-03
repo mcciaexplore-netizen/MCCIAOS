@@ -311,6 +311,17 @@ export interface TodayCounts {
   overdue: number;
 }
 
+/** Whether each person with open work is keeping their tracker current. */
+export interface WorkStaleness {
+  userId: string;
+  userName: string;
+  openCount: number;
+  /** Last identified update by this person on work they currently carry. */
+  lastUpdateAt: string | null;
+  daysSinceUpdate: number | null;
+  isStale: boolean;
+}
+
 /** Deadline within three days and still live — the At risk block. */
 export interface AtRiskTask {
   id: string;

@@ -1,0 +1,22 @@
+
+  VITE v5.4.21  ready in 127 ms
+
+  ➜  Local:   http://localhost:5199/
+  ➜  Network: use --host to expose
+[store] using Neon Postgres (ep-flat-credit-ax9sra1c-pooler.c-4.us-east-2.aws.neon.tech)
+2:29:31 PM [vite] page reload server/work-tracker.ts
+2:29:31 PM [vite] page reload server/google-sheets.ts
+2:29:31 PM [vite] page reload server/daily-export.ts
+2:29:31 PM [vite] hmr update /src/settings/SettingsContext.tsx, /src/index.css, /src/components/AppLayout.tsx
+2:31:05 PM [vite] hmr update /src/settings/SettingsContext.tsx, /src/index.css, /src/components/AppLayout.tsx
+2:31:05 PM [vite] page reload src/components/TeamOnTask.tsx
+2:31:24 PM [vite] page reload server/work-tracker.ts
+2:31:24 PM [vite] page reload server/daily-export.ts
+2:32:49 PM [vite] page reload src/types/index.ts
+2:32:49 PM [vite] page reload server/work-tracker.ts
+2:32:49 PM [vite] hmr update /src/settings/SettingsContext.tsx, /src/index.css, /src/components/AppLayout.tsx
+2:33:09 PM [vite] page reload server/work-tracker.ts
+2:33:23 PM [vite] page reload server/handlers.ts
+2:33:33 PM [vite] page reload server/handlers.ts
+2:35:52 PM [vite] page reload src/components/PersonTasks.tsx
+2:36:20 PM [vite] page reload src/components/PersonTasks.tsx

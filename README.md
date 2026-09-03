@@ -92,7 +92,7 @@ piece of work and every field is edited in place. Backed by `tasks`,
 
 **One table for the whole team.** `tasks` is filtered by `user_id`; there is no
 table, schema or database per person. The person filter is a WHERE clause.
-**One person per task** — there is no collaborators table.
+Each task has one owner and may also name collaborators in `task_members`.
 
 ### Pipeline and rules
 
@@ -122,6 +122,20 @@ Computed per query, never stored, so they cannot go stale.
   with no signal.
 - **Past deadline** — the hard limit has gone by. Red and bold.
 - **At risk** — deadline within three days and still live.
+
+### Team freshness
+
+The tracker shows one compact stand-up card per active person: their current
+open-work count and the age of their latest identified update on work they
+still carry. Today is green, yesterday is amber, and more than one full day (or
+no identified update at all) is red. People with no open work stay neutral.
+Clicking a card filters the table to that person.
+
+Freshness follows `task_activity.actor_id`, not merely `tasks.updated_at`. If a
+colleague edits somebody's task, the data changed but it does not demonstrate
+that the owner checked in. As with the rest of the activity trail, the actor is
+self-declared through the person selector; this is a workflow signal, not an
+authentication guarantee.
 
 ### The toolbar
 
@@ -203,20 +217,16 @@ A task that already names somebody who has since lost the flag still shows them,
 and still offers them **on that task only** — otherwise their name would vanish
 from every task that recorded it.
 
-**Recorded work is read-only.** A field that already holds a value cannot be
-changed without the admin passcode, and neither can deleting a task. A field
-that is still empty stays editable — filling in a blank adds information, it
-does not revise a record, and making people unlock to enter a missing due date
-would only teach them to leave the app unlocked all day. Note that status and
-priority always hold a value, so every progress update needs the passcode; that
-is the intended trade and it is the main day-to-day cost of the freeze.
+**Commitments and operational updates are treated differently.** Filled title,
+owner/team, allocation date, hard deadline, reporting line and approver fields
+stay locked until the Settings switch is deliberately unlocked. An empty
+commitment can still be filled. Status, percentage, priority and the working
+due date are always editable because those values are expected to move during
+the work. Changes to both groups are recorded with old→new values.
 
 The switch lives in **Settings → Work Tracker**, together with the per-person
-bulk clear. The tracker itself shows only a **Locked** / **Unlocked** status that
-links there — a status, not a switch, because the alternative is discovering the
-table is read-only by clicking a cell and finding it inert with nowhere obvious
-to go. Reaching Settings at all requires the passcode, so arriving there unlocks
-editing; **Lock again** puts it back without leaving the page.
+bulk clear and Sheets export. It is stored for that browser and guards against
+accidental revisions; deleting a task also remains disabled while it is locked.
 
 **Clearing one person's work.** Settings → Work Tracker lists everybody with
 what they are carrying and a Clear button each. It hides rather than destroys,
@@ -226,16 +236,10 @@ mistake is larger. `DELETE /api/tasks` requires `?user=<id>`: there is no
 clear-all, because the one button capable of emptying the whole tracker should
 not sit next to nine that each empty a single person's.
 
-It is enforced in the API, not only on screen — every edit carries the passcode
-in an `x-settings-passcode` header and `server/handlers.ts` refuses the ones
-that do not. A check that lived only in the browser would be a suggestion, and
-one PATCH from anywhere else would walk straight past it.
-
-**What this is not.** It is not authentication. This app has no login, everyone
-shares one passcode, and anyone holding it — or reading a tab's session storage
-— can change anything. It stops accidents and casual edits; it does not record
-who made a change, and it does not keep out anybody determined. See
-`src/lib/lock.ts`.
+**What this is not.** The field lock is not API authorization. The app has no
+login and the selected actor is forgeable, as required for this trusted-team
+tool. The lock prevents accidental clicks in the UI; the activity trail and
+Sheets Change Log make intentional changes reviewable. See `src/lib/editLock.ts`.
 
 **Adding work while viewing one person.** Filtered to somebody, the new row's
 Name is frozen to them — their avatar and name, no picker. A picker there could
@@ -419,7 +423,14 @@ day already present is skipped. **Settings → Work Tracker → Run now** does t
 same thing on demand and offers to write again anyway, which is what you want
 after correcting a task late in the day.
 
-**Setup.** Three environment variables, and the sheet shared with the service
+Every task change is recorded immediately in the database with its actor and
+old→new values. Each Sheets run also syncs those entries to a shared **Change
+Log** tab. Audit-entry IDs make that sync incremental: rerunning it does not
+duplicate existing entries, while edits made after an earlier same-day run are
+still appended on the next run. A forced rerun can duplicate the daily work
+snapshot by design, but never duplicates the Change Log.
+
+**Setup.** Four environment variables, and the sheet shared with the service
 account:
 
 | Variable | Where it comes from |

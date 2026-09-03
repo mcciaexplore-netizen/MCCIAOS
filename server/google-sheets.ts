@@ -234,5 +234,22 @@ export async function openSheet(cfg: SheetsConfig) {
       const r = await call<{ values?: string[][] }>(cfg, token, `/values/${range}`);
       return r.values?.[0] ?? [];
     },
+
+    /** Values already present in one column, used as stable sync markers. */
+    async columnValues(title: string, column: string): Promise<string[]> {
+      if (!/^[A-Z]+$/.test(column)) {
+        throw new SheetsError(`Invalid sheet column: ${column}`, 500);
+      }
+      const range = encodeURIComponent(`${title}!${column}:${column}`);
+      const r = await call<{ values?: (string | number | null)[][] }>(
+        cfg,
+        token,
+        `/values/${range}`,
+      );
+      return (r.values ?? [])
+        .map((row) => row[0])
+        .filter((value): value is string | number => value !== null && value !== undefined)
+        .map(String);
+    },
   };
 }

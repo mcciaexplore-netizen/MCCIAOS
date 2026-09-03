@@ -12,6 +12,7 @@ import {
 } from '@/components/TrackerCells';
 import { useToast } from '@/components/Toast';
 import { trackerApi } from '@/lib/workTrackerApi';
+import { readTrackerActor } from '@/lib/trackerIdentity';
 import {
   TASK_PRIORITIES,
   TASK_PRIORITY_LABELS,
@@ -37,6 +38,7 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
   const { toast } = useToast();
   const [savingCells, setSavingCells] = useState<Record<string, boolean>>({});
   const [cellErrors, setCellErrors] = useState<Record<string, string>>({});
+  const actor = readTrackerActor();
 
   const query = useQuery({
     queryKey: ['tasks', person.id, 'all'],
@@ -47,6 +49,7 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
   const invalidate = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['tasks'] });
     qc.invalidateQueries({ queryKey: ['task-counts'] });
+    qc.invalidateQueries({ queryKey: ['tracker-staleness'] });
   }, [qc]);
 
   const save = useCallback(
@@ -58,7 +61,7 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
         return rest;
       });
       try {
-        await trackerApi.update(id, { [field]: value });
+        await trackerApi.update(id, { [field]: value }, actor);
         invalidate();
       } catch (err) {
         setCellErrors((e) => ({ ...e, [k]: (err as Error).message }));
@@ -69,17 +72,17 @@ export function PersonTasks({ person, users }: { person: User; users: User[] }) 
         });
       }
     },
-    [invalidate],
+    [actor, invalidate],
   );
 
   const remove = useMutation({
-    mutationFn: (id: string) => trackerApi.remove(id),
+    mutationFn: (id: string) => trackerApi.remove(id, actor),
     onSuccess: (_d, id) => {
       invalidate();
       toast('Task deleted', 'success', {
         label: 'Undo',
         onAct: async () => {
-          await trackerApi.restore(id);
+          await trackerApi.restore(id, actor);
           invalidate();
           toast('Task restored');
         },

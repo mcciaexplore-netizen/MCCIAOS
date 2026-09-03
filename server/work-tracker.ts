@@ -23,6 +23,7 @@ import type {
   TaskTabCounts,
   TodayCounts,
   User,
+  WorkStaleness,
 } from '../src/types/index.js';
 
 /** A caller-caused failure carrying the status the API should answer with. */
@@ -328,6 +329,78 @@ export async function getTask(id: string): Promise<Task | null> {
   return rows[0] ? toTask(rows[0]) : null;
 }
 
+/** One recorded change, flattened for a report rather than a task timeline. */
+export interface ChangeRecord {
+  id: string;
+  day: string;
+  at: string;
+  actorName: string | null;
+  ownerName: string | null;
+  title: string;
+  field: string;
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+/**
+ * Every change recorded through an IST day, across everybody.
+ *
+ * Deliberately not filtered by `LIVE`. A task that was removed is exactly the
+ * one whose history matters most, and its `deleted` entry is the only record
+ * that it ever existed.
+ *
+ * `userId`, `reportTo` and `approverId` store ids, which say nothing in a
+ * report, so they are resolved to names here. The lookup is a separate query
+ * rather than a join: old_value is free text, and casting it to uuid in SQL
+ * fails the whole statement the moment one row holds a title.
+ */
+export async function listChangesThrough(day: string): Promise<ChangeRecord[]> {
+  const db = requireSql();
+  const [activity, users] = await Promise.all([
+    db.query(
+      `select a.id,
+              to_char(a.changed_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as day,
+              to_char(a.changed_at at time zone 'Asia/Kolkata', 'HH24:MI:SS') as at,
+              actor.name as actor_name, owner.name as owner_name,
+              coalesce(a.task_title, t.title) as title,
+              a.field, a.old_value, a.new_value
+         from task_activity a
+         join tasks t on t.id = a.task_id
+         left join users actor on actor.id = a.actor_id
+         left join users owner on owner.id = t.user_id
+        where (a.changed_at at time zone 'Asia/Kolkata')::date <= $1::date
+        order by a.changed_at`,
+      [day],
+    ),
+    db.query(`select id, name from users`),
+  ]);
+  const rows = activity as Record<string, unknown>[];
+  const people = users as { id: string; name: string }[];
+
+  const names = new Map(people.map((p) => [p.id, p.name]));
+  const personFields = new Set(['userId', 'reportTo', 'approverId']);
+  const label = (field: string, value: unknown) => {
+    if (value === null || value === undefined) return null;
+    const text = String(value);
+    return personFields.has(field) ? (names.get(text) ?? text) : text;
+  };
+
+  return rows.map((r) => {
+    const field = String(r.field);
+    return {
+      id: String(r.id),
+      day: String(r.day),
+      at: String(r.at),
+      actorName: (r.actor_name as string | null) ?? null,
+      ownerName: (r.owner_name as string | null) ?? null,
+      title: String(r.title),
+      field,
+      oldValue: label(field, r.old_value),
+      newValue: label(field, r.new_value),
+    };
+  });
+}
+
 export async function getActivity(taskId: string): Promise<TaskActivity[]> {
   if (!UUID_RE.test(taskId)) return [];
   const db = requireSql();
@@ -394,6 +467,74 @@ export async function getToday(user?: string | null): Promise<TodayCounts> {
     dueToday: Number(r.due_today ?? 0),
     overdue: Number(r.overdue ?? 0),
   };
+}
+
+/**
+ * One stand-up row per active person: current open workload and the last time
+ * that person identified themselves on a change to work they still carry.
+ *
+ * Attribution intentionally follows `actor_id`, not merely `tasks.updated_at`.
+ * A colleague changing somebody's task means the data moved, but does not
+ * answer whether that person is filling in their updates. The actor is still
+ * self-declared by the tracker selector: useful workflow evidence, not auth.
+ */
+export async function getWorkStaleness(staleAfterDays = 1): Promise<WorkStaleness[]> {
+  const db = requireSql();
+  const threshold = Number.isInteger(staleAfterDays)
+    ? Math.min(30, Math.max(0, staleAfterDays))
+    : 1;
+  const rows = (await db.query(
+    `with open_work as (
+       select u.id as user_id, t.id as task_id
+         from users u
+         join tasks t
+           on t.deleted_at is null
+          and t.status in ${OPEN}
+          and (t.user_id = u.id or exists (
+            select 1 from task_members m
+             where m.task_id = t.id and m.user_id = u.id
+          ))
+        where u.is_active
+     ), freshness as (
+       select w.user_id,
+              count(distinct w.task_id)::int as open_count,
+              max(a.changed_at) filter (where a.actor_id = w.user_id) as last_update_at
+         from open_work w
+         left join task_activity a on a.task_id = w.task_id
+        group by w.user_id
+     )
+     select u.id as user_id, u.name as user_name,
+            coalesce(f.open_count, 0)::int as open_count,
+            f.last_update_at,
+            case when f.last_update_at is null then null
+                 else (${TODAY} - (f.last_update_at at time zone 'Asia/Kolkata')::date)::int
+             end as days_since_update
+       from users u
+       left join freshness f on f.user_id = u.id
+      where u.is_active
+      order by
+        case when coalesce(f.open_count, 0) = 0 then 2
+             when f.last_update_at is null then 0 else 1 end,
+        days_since_update desc nulls first,
+        lower(u.name)`,
+  )) as Record<string, unknown>[];
+
+  return rows.map((r) => {
+    const openCount = Number(r.open_count ?? 0);
+    const daysSinceUpdate =
+      r.days_since_update === null || r.days_since_update === undefined
+        ? null
+        : Number(r.days_since_update);
+    return {
+      userId: String(r.user_id),
+      userName: String(r.user_name),
+      openCount,
+      lastUpdateAt: iso((r.last_update_at as string | Date | null) ?? null),
+      daysSinceUpdate,
+      isStale:
+        openCount > 0 && (daysSinceUpdate === null || daysSinceUpdate > threshold),
+    };
+  });
 }
 
 /** Deadline within three days and still live — the At risk block. */

@@ -10,6 +10,7 @@ import type {
   TaskTabCounts,
   TodayCounts,
   User,
+  WorkStaleness,
 } from '@/types';
 import type {
   ConsultationInput,
@@ -147,6 +148,12 @@ export const trackerApi = {
     return request<TodayCounts>(`/api/today?${qs({ user })}`);
   },
 
+  staleness(afterDays = 1) {
+    return request<{ staleAfterDays: number; people: WorkStaleness[] }>(
+      `/api/staleness?afterDays=${afterDays}`,
+    );
+  },
+
   atRisk(user?: string) {
     return request<{ tasks: AtRiskTask[] }>(`/api/at-risk?${qs({ user })}`);
   },
@@ -170,8 +177,8 @@ export const trackerApi = {
     });
   },
 
-  remove(id: string) {
-    return request<{ success: boolean }>(`/api/tasks/${id}`, {
+  remove(id: string, actor?: string) {
+    return request<{ success: boolean }>(`/api/tasks/${id}?${qs({ actor })}`, {
       method: 'DELETE',
       authorised: true,
     });
@@ -188,6 +195,7 @@ export const trackerApi = {
       written: number;
       skipped: number;
       people: { name: string; tab: string; tasks: number; created: boolean; skipped?: string }[];
+      log: { changes: number; skipped?: string };
     }>(`/api/export/daily${force ? '?force=true' : ''}`, {
       method: 'POST',
       authorised: true,

@@ -141,3 +141,31 @@ export const TASK_PRIORITY_COLOR: Record<TaskPriority, string> = {
   medium: '#E9730C',
   low: '#2E7CD6',
 };
+
+/**
+ * Which task fields the edit lock protects.
+ *
+ * A commitment is something the team agreed: what the work is, whose it is,
+ * when it was handed over, and the hard limit. Changing one of those rewrites
+ * the agreement, so the lock stands in front of it.
+ *
+ * Everything else is a status. Status, progress, priority and the working
+ * target are *meant* to move — that is the daily update the tracker exists to
+ * capture. Freezing them was why nothing had been updated since the day it was
+ * entered: zero percentage changes and one status change had ever been logged.
+ *
+ * Both kinds are logged identically. The lock decides what needs deliberate
+ * intent to change; the activity trail records every change either way.
+ */
+export const COMMITMENT_FIELDS = [
+  'title',
+  'userId',
+  'allocationDate',
+  'deadlineDate',
+  'reportTo',
+  'approverId',
+] as const;
+
+/** True when the lock should stand in front of this field. */
+export const isCommitmentField = (field: string): boolean =>
+  (COMMITMENT_FIELDS as readonly string[]).includes(field);

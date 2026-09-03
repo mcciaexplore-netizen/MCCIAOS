@@ -19,12 +19,15 @@ import type { Task, User } from '@/types';
 export function TeamOnTask({
   task,
   users,
+  actor,
   disabled,
   onChanged,
   onOpenChange,
 }: {
   task: Task;
   users: User[];
+  /** Person selected in the tracker, recorded in the task's activity trail. */
+  actor?: string;
   disabled?: boolean;
   onChanged: () => void;
   /**
@@ -44,7 +47,7 @@ export function TeamOnTask({
   const owner = users.find((u) => u.id === task.userId);
 
   const save = useMutation({
-    mutationFn: (ids: string[]) => trackerApi.setMembers(task.id, ids),
+    mutationFn: (ids: string[]) => trackerApi.setMembers(task.id, ids, actor),
     onSuccess: (r) => {
       onChanged();
       const n = r.task.members.length;
