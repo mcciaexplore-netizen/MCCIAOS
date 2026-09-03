@@ -73,6 +73,21 @@ const LATE_DATE = `coalesce(t.deadline_date, t.due_date)`;
  */
 const LIVE = `t.deleted_at is null`;
 
+/**
+ * Whether a person is on a task: they own it, or they are a member of it.
+ *
+ * Group work is filed under one owner and listed once, so a collaborator's
+ * involvement lives entirely in task_members. Matching only `user_id` meant
+ * somebody added to a task could not see it in their own view — the work was
+ * theirs and invisible to them.
+ *
+ * Takes the placeholder rather than the value so each caller keeps its own
+ * parameter numbering.
+ */
+const onTask = (param: string) =>
+  `(t.user_id = ${param}::uuid or exists (
+      select 1 from task_members m where m.task_id = t.id and m.user_id = ${param}::uuid))`;
+
 // ---- Row shapes ------------------------------------------------------------
 
 interface TaskRow {
@@ -259,7 +274,10 @@ function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
     return `$${params.length}`;
   };
 
-  if (f.user) conditions.push(`t.user_id = ${bind(f.user)}::uuid`);
+  // Owner or member. A task is filed under one person and listed once, so a
+  // collaborator's involvement lives only in task_members — matching user_id
+  // alone made their own work invisible in their own view.
+  if (f.user) conditions.push(onTask(bind(f.user)));
   if (f.status) conditions.push(`t.status = ${bind(f.status)}`);
   if (f.priority) conditions.push(`t.priority = ${bind(f.priority)}`);
 
@@ -342,9 +360,9 @@ export async function getTabCounts(user?: string | null): Promise<TaskTabCounts>
   const who = user && UUID_RE.test(user) ? user : null;
   const rows = (await db.query(
     `select
-       count(*) filter (where $1::uuid is null or t.user_id = $1::uuid)::int as all,
-       count(*) filter (where $1::uuid is not null and t.user_id = $1::uuid)::int as assigned_to_me,
-       count(*) filter (where ($1::uuid is null or t.user_id = $1::uuid)
+       count(*) filter (where $1::uuid is null or ${onTask('$1')})::int as all,
+       count(*) filter (where $1::uuid is not null and ${onTask('$1')})::int as assigned_to_me,
+       count(*) filter (where ($1::uuid is null or ${onTask('$1')})
                           and ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
                           and t.status in ${OPEN})::int as overdue
      from tasks t
@@ -367,7 +385,7 @@ export async function getToday(user?: string | null): Promise<TodayCounts> {
        count(*) filter (where ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
                           and t.status in ${OPEN})::int as overdue
      from tasks t
-     where ${LIVE} and ($1::uuid is null or t.user_id = $1::uuid)`,
+     where ${LIVE} and ($1::uuid is null or ${onTask('$1')})`,
     [who],
   )) as Record<string, string | number>[];
   const r = rows[0] ?? {};
@@ -399,7 +417,7 @@ export async function getAtRisk(
        and t.deadline_date is not null
        and t.deadline_date between ${TODAY} and ${TODAY} + ${days}
        and t.status in ${OPEN}
-       and ($1::uuid is null or t.user_id = $1::uuid)
+       and ($1::uuid is null or ${onTask('$1')})
      order by t.deadline_date asc, t.title asc`,
     [who],
   )) as Record<string, string>[];
@@ -660,6 +678,11 @@ export async function deleteTask(
  * Counts the live rows only. Removed work is not somebody's workload, and
  * offering to "delete all 12" when 8 of them are already gone would be a lie
  * about what the button does.
+ *
+ * Owner-only, deliberately, unlike the tracker's person filter. This number
+ * sits next to "Clear", which deletes what it counts — and clearing somebody's
+ * workload must not delete a task that belongs to a colleague and merely has
+ * them on it.
  */
 export async function taskCountsByUser(): Promise<Record<string, number>> {
   const db = requireSql();
