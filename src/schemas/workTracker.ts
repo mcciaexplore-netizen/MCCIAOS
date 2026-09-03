@@ -90,7 +90,16 @@ const userFields = z.object({
   // Required by the form for anyone added or edited from now on, but the column
   // stays nullable: the rows that already existed have no address and
   // inventing one for a real person would be fabricating data.
-  email: z.string().trim().email('Enter a valid email').nullable().optional(),
+  // An empty string means "no email" and becomes null, matching the nullable
+  // column. Without this the form could show a blank field it could not save:
+  // clearing the input sends '', which .email() rejects, so the request came
+  // back 422 while the UI insisted the value was fine.
+  email: z
+    .preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+      z.string().trim().email('Enter a valid email').nullable(),
+    )
+    .optional(),
   designation: z.string().nullable().optional(),
   department: z.string().nullable().optional(),
   reportsTo: uuid.nullable().optional(),
