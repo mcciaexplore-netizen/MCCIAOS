@@ -67,6 +67,43 @@ const OPEN = `('upcoming','ongoing','hold')`;
  * with no deadline falls back to its due date, otherwise it could never be late.
  */
 const LATE_DATE = `coalesce(t.deadline_date, t.due_date)`;
+
+/**
+ * 17:00 IST — the point in the day after which unfinished work has missed
+ * another day.
+ *
+ * Chosen to sit an hour ahead of the 18:00 export, so the number a person sees
+ * in the tracker is already settled by the time the same number is written to
+ * their sheet. A cut-off at midnight would have let the export record a count
+ * that changed minutes later.
+ */
+const CUTOFF = `time '17:00'`;
+
+/**
+ * How many days a task is past its deadline, counting the deadline day itself
+ * once the cut-off has passed.
+ *
+ * A deadline of the 3rd reads 0 all through the 3rd, becomes 1 at 17:00 that
+ * evening, and gains one at each 17:00 after. Missing the deadline is a fact
+ * about the day it was missed, not about the following morning, so the day the
+ * work was due has to be able to count against it.
+ *
+ * Completed and stopped work reads 0 no matter how late it ran: this measures
+ * what is still outstanding, not how badly finished work overran. A task with
+ * neither date cannot be late at all.
+ */
+const DUE_DAYS = `(case
+    when t.status not in ${OPEN} or ${LATE_DATE} is null then 0
+    else greatest(0, (${TODAY} - ${LATE_DATE})
+      + case when (now() at time zone 'Asia/Kolkata')::time >= ${CUTOFF} then 1 else 0 end)
+  end)`;
+
+/**
+ * Late is simply "owes at least one day", so the badge, the Overdue tab and
+ * every count are the same statement. They were four copies of the same
+ * comparison before, which is how they would have drifted apart.
+ */
+const IS_OVERDUE = `${DUE_DAYS} > 0`;
 /**
  * Removed work is hidden, not destroyed (db/work-tracker-history.sql), so every
  * read has to say so. Anything that counts or lists tasks and forgets this will
@@ -112,6 +149,7 @@ interface TaskRow {
   created_at: string | Date;
   updated_at: string | Date;
   is_overdue: boolean;
+  due_days: number;
   has_slipped: boolean;
   past_deadline: boolean;
   days_left: number | null;
@@ -137,8 +175,8 @@ const TASK_COLUMNS = `
   t.report_to,   ur.name as report_to_name,
   t.approver_id, ua.name as approver_name,
   t.completed_at, t.approved_at, t.created_at, t.updated_at,
-  (${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
-    and t.status in ${OPEN})                                  as is_overdue,
+  ${IS_OVERDUE}                                               as is_overdue,
+  ${DUE_DAYS}::int                                            as due_days,
   -- Past the working target but still inside the deadline. Without this the
   -- deadline-based overdue rule would leave a slipped target with no signal.
   (t.due_date is not null and t.due_date < ${TODAY}
@@ -178,6 +216,7 @@ function toTask(row: TaskRow): Task {
     createdAt: iso(row.created_at) as string,
     updatedAt: iso(row.updated_at) as string,
     isOverdue: Boolean(row.is_overdue),
+    dueDays: Number(row.due_days ?? 0),
     hasSlipped: Boolean(row.has_slipped),
     pastDeadline: Boolean(row.past_deadline),
     daysLeft: row.days_left == null ? null : Number(row.days_left),
@@ -285,7 +324,7 @@ function buildWhere(f: TaskFilters): { clause: string; params: unknown[] } {
   switch (f.tab) {
     case 'overdue':
       conditions.push(
-        `${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY} and t.status in ${OPEN}`,
+        IS_OVERDUE,
       );
       break;
     // "All work" is everything, and "Assigned to me" is the person filter above.
@@ -436,8 +475,7 @@ export async function getTabCounts(user?: string | null): Promise<TaskTabCounts>
        count(*) filter (where $1::uuid is null or ${onTask('$1')})::int as all,
        count(*) filter (where $1::uuid is not null and ${onTask('$1')})::int as assigned_to_me,
        count(*) filter (where ($1::uuid is null or ${onTask('$1')})
-                          and ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
-                          and t.status in ${OPEN})::int as overdue
+                          and ${IS_OVERDUE})::int as overdue
      from tasks t
      where ${LIVE}`,
     [who],
@@ -455,8 +493,7 @@ export async function getToday(user?: string | null): Promise<TodayCounts> {
     `select
        to_char(${TODAY}, 'YYYY-MM-DD') as date,
        count(*) filter (where t.due_date = ${TODAY} and t.status in ${OPEN})::int as due_today,
-       count(*) filter (where ${LATE_DATE} is not null and ${LATE_DATE} < ${TODAY}
-                          and t.status in ${OPEN})::int as overdue
+       count(*) filter (where ${IS_OVERDUE})::int as overdue
      from tasks t
      where ${LIVE} and ($1::uuid is null or ${onTask('$1')})`,
     [who],

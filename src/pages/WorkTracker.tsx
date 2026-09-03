@@ -79,6 +79,7 @@ const COLUMNS = [
   { key: 'allocation', label: 'Allocation', width: 80, sticky: false, flex: false, sort: 'allocation' },
   { key: 'due', label: 'Due', width: 130, sticky: false, flex: false, sort: 'due' },
   { key: 'deadline', label: 'Deadline', width: 130, sticky: false, flex: false, sort: 'deadline' },
+  { key: 'dueDays', label: 'Due days', width: 84, sticky: false, flex: false, sort: '' },
   { key: 'percentage', label: 'Percentage', width: 92, sticky: false, flex: false, sort: '' },
   { key: 'reportTo', label: 'Reports to', width: 132, sticky: false, flex: false, sort: '' },
   { key: 'approver', label: 'Approver', width: 132, sticky: false, flex: false, sort: '' },
@@ -1167,6 +1168,28 @@ function TaskRow({
         </td>
       )}
 
+      {visible('dueDays') && (
+        <td>
+          {/* Read-only: it is counted from the deadline and the clock, so there
+              is nothing here for anyone to fill in or correct. */}
+          <span
+            className={cn(
+              'block px-2 py-1 text-sm tabular-nums',
+              task.dueDays > 0
+                ? 'font-semibold text-rose-600 dark:text-rose-400'
+                : 'text-slate-300 dark:text-slate-600',
+            )}
+            title={
+              task.dueDays > 0
+                ? `${task.dueDays} day${task.dueDays === 1 ? '' : 's'} past the deadline, counted from 17:00 on the deadline day`
+                : 'Not past its deadline'
+            }
+          >
+            {task.dueDays > 0 ? task.dueDays : '—'}
+          </span>
+        </td>
+      )}
+
       {visible('percentage') && (
         <td {...td('percentage')}>
           <EditableNumber
@@ -1593,7 +1616,6 @@ function NewTaskRow({
             <RowInput
               type="date"
               value={deadlineDate}
-              min={dueDate || undefined}
               onChange={(e) => setDeadlineDate(e.target.value)}
               aria-label="Deadline"
             />
@@ -1740,6 +1762,14 @@ function MobileCard({
             {task.deadlineDate ? formatJiraDate(task.deadlineDate) : '—'}
           </dd>
         </div>
+        {task.dueDays > 0 && (
+          <div>
+            <dt className="text-slate-400">Due days</dt>
+            <dd className="tabular-nums font-semibold text-rose-600 dark:text-rose-400">
+              {task.dueDays} day{task.dueDays === 1 ? '' : 's'} late
+            </dd>
+          </div>
+        )}
       </dl>
 
       {sheet && (

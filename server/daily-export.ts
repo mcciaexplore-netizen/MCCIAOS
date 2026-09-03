@@ -26,6 +26,7 @@ const HEADER = [
   'Due',
   'Deadline',
   'Percentage',
+  'Due days',
   'Reports to',
   'Approver',
   'Late',
@@ -43,6 +44,9 @@ function row(day: string, t: Task): (string | number | null)[] {
     // Empty rather than 0: a task nobody has put a figure on should keep
     // saying nothing once it reaches the sheet.
     t.percentage ?? '',
+    // Blank rather than 0 for work that is on time, so a column of numbers is
+    // a list of problems rather than a wall of zeroes to read past.
+    t.dueDays > 0 ? t.dueDays : '',
     t.reportToName ?? '',
     t.approverName ?? '',
     t.isOverdue ? 'LATE' : '',

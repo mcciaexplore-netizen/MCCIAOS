@@ -277,6 +277,8 @@ export interface Task {
    * and the work is still live. Stopped and completed work is never late.
    */
   isOverdue: boolean;
+  /** Days past the deadline, counting the deadline day from 17:00 IST. 0 when not late. */
+  dueDays: number;
   /** Past the working target but still inside the deadline. */
   hasSlipped: boolean;
   /** The hard limit has passed and the work is not finished. */
