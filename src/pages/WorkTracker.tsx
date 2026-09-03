@@ -839,7 +839,6 @@ export default function WorkTracker() {
                       onActivity={() => setActivityFor(t)}
                       onMembersChanged={() => {
                         qc.invalidateQueries({ queryKey: ['tasks'] });
-                        qc.invalidateQueries({ queryKey: ['shared-work'] });
                       }}
                       onApprove={() => approve.mutate(t.id)}
                       onDelete={() => {
@@ -907,7 +906,7 @@ function TaskRow({
   onActivity: () => void;
   onApprove: () => void;
   onDelete: () => void;
-  /** Refreshes the table and the shared-work panel after the team changes. */
+  /** Refreshes the table after the people on a task change. */
   onMembersChanged: () => void;
 }) {
   const [menu, setMenu] = useState(false);

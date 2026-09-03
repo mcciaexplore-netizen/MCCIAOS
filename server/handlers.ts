@@ -35,7 +35,6 @@ import {
   restoreTasksForUser,
   taskCountsByUser,
   setTaskMembers,
-  getSharedWork,
 } from './work-tracker.js';
 import {
   ConsultationError,
@@ -426,7 +425,6 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     pathname.startsWith('/api/tasks') ||
     pathname.startsWith('/api/users') ||
     pathname === '/api/task-counts' ||
-    pathname === '/api/shared-work' ||
     pathname.startsWith('/api/consultations') ||
     pathname === '/api/export/daily' ||
     pathname === '/api/summary' ||
@@ -969,13 +967,6 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
         return json(200, { success: true });
       }
       return json(405, { error: 'Method not allowed' });
-    }
-
-    // ---- /api/shared-work ----------------------------------------------------
-    // Work that more than one person is on.
-    if (pathname === '/api/shared-work') {
-      if (method !== 'GET') return json(405, { error: 'Method not allowed' });
-      return json(200, { shared: await getSharedWork(query.get('user')) });
     }
 
     // ---- /api/task-counts --------------------------------------------------

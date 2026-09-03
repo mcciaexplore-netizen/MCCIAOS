@@ -240,18 +240,6 @@ export const trackerApi = {
     });
   },
 
-  /** Work more than one person is on. */
-  sharedWork(user?: string) {
-    return request<{
-      shared: {
-        id: string;
-        title: string;
-        ownerName: string;
-        people: { name: string; colour: string | null }[];
-      }[];
-    }>(`/api/shared-work?${qs({ user })}`);
-  },
-
   /** Live task count per person, for the Settings roster. */
   taskCounts() {
     return request<{ counts: Record<string, number> }>('/api/task-counts');

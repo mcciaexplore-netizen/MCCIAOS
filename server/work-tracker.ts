@@ -772,45 +772,6 @@ export async function setTaskMembers(
   return getTask(taskId);
 }
 
-/**
- * Work that more than one person is on, for the tracker's shared-work panel.
- *
- * Counts the owner too, so "3 people" means three, not the owner plus three.
- */
-export async function getSharedWork(
-  user?: string | null,
-): Promise<{ id: string; title: string; ownerName: string; people: { name: string; colour: string | null }[] }[]> {
-  const db = requireSql();
-  const who = user && UUID_RE.test(user) ? user : null;
-  const rows = (await db.query(
-    `select t.id, t.title, uo.name as owner_name,
-            json_build_object('name', uo.name, 'colour', uo.colour) as owner,
-            coalesce((
-              select json_agg(json_build_object('name', mu.name, 'colour', mu.colour) order by mu.name)
-                from task_members m join users mu on mu.id = m.user_id
-               where m.task_id = t.id
-            ), '[]'::json) as members
-       from tasks t join users uo on uo.id = t.user_id
-      where ${LIVE}
-        and exists (select 1 from task_members m where m.task_id = t.id)
-        and ($1::uuid is null
-             or t.user_id = $1::uuid
-             or exists (select 1 from task_members m2 where m2.task_id = t.id and m2.user_id = $1::uuid))
-      order by t.created_at desc`,
-    [who],
-  )) as Record<string, unknown>[];
-
-  return rows.map((r) => ({
-    id: String(r.id),
-    title: String(r.title),
-    ownerName: String(r.owner_name),
-    people: [
-      r.owner as { name: string; colour: string | null },
-      ...((r.members ?? []) as { name: string; colour: string | null }[]),
-    ],
-  }));
-}
-
 /** Puts back a task that was removed. Undo, and the reason hiding beats deleting. */
 export async function restoreTask(
   id: string,
