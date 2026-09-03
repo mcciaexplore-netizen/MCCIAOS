@@ -1315,14 +1315,15 @@ function MemberForm({
       setError('A name is required');
       return;
     }
-    // Required from now on, though the column stays nullable for the rows that
-    // predate this and have no address.
-    if (!email.trim()) {
-      setError('An email is required');
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError('Enter a valid email');
+    // Optional, matching every other definition of this field: the column is
+    // nullable (db/work-tracker.sql:20), the type is `string | null`, the Zod
+    // schema is .nullable().optional(), and TRD.md:76 keeps `users` as a plain
+    // name list. Requiring it here made all 10 existing rows — none of which has
+    // an address — impossible to edit at all.
+    //
+    // A value that IS supplied still has to look like an address.
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Enter a valid email, or leave it blank');
       return;
     }
     setError(null);
@@ -1359,7 +1360,7 @@ function MemberForm({
             placeholder="Applied AI Studio"
           />
         </Field>
-        <Field label="Email" required>
+        <Field label="Email">
           <Input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
