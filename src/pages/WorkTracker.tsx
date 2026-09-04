@@ -1581,6 +1581,12 @@ function NewTaskRow({
             />
           </td>
         )}
+        {/* Nothing to enter: days late is counted from the deadline and the clock,
+            and a task being created is not late yet. The cell still has to exist,
+            or every column after it shifts one place left. */}
+        {visible('due') && (
+          <td className="px-2 text-xs text-slate-300 dark:text-slate-600">&mdash;</td>
+        )}
         {visible('percentage') && (
           <td>
             <RowInput
