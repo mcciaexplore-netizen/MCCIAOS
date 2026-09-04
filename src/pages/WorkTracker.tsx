@@ -522,6 +522,37 @@ export default function WorkTracker() {
 
   // ---- Keyboard grid navigation -------------------------------------------
   const tableRef = useRef<HTMLTableElement>(null);
+
+  /**
+   * Shouts when a row has a different number of cells than the header.
+   *
+   * A short row is silent: HTML puts each cell in the next free slot, so every
+   * column after the gap draws one place to the left and the page still looks
+   * like a table. That is how the new-task row came to show a list of names
+   * under the Percentage heading — the Due column had been added to the header
+   * and to the data rows but not to that one.
+   *
+   * TypeScript cannot catch it: a table's columns are a runtime property of the
+   * DOM, not of the JSX. Counting them is the only check there is.
+   */
+  useEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const expected = table.querySelectorAll('thead th').length;
+    table.querySelectorAll('tbody tr').forEach((row, i) => {
+      // A message row spanning the table is deliberate, not a gap.
+      if (row.querySelector('[colspan]')) return;
+      if (row.children.length !== expected) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[work tracker] row ${i} has ${row.children.length} cells but the ` +
+            `header has ${expected}. Every column after the gap is drawing one ` +
+            `place to the left.`,
+          row,
+        );
+      }
+    });
+  });
   const onGridKey = (e: React.KeyboardEvent<HTMLTableElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
     const target = e.target as HTMLElement;
