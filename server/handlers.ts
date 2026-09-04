@@ -57,7 +57,7 @@ import {
 import { getOrgSettings, readOrgSettings, saveOrgSettings } from './org-settings.js';
 import { orgSettingsSchema } from '../src/schemas/orgSettings.js';
 import { runDailyExport } from './daily-export.js';
-import { SheetsError } from './google-sheets.js';
+import { SheetsError, sheetsConfig } from './google-sheets.js';
 import { startLiveLog } from './live-log.js';
 import {
   getActivity,
@@ -192,6 +192,20 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   // the connection string.
   if (pathname === '/api/health' && method === 'GET') {
     const info = describeStore();
+    // Whether the export can run, without ever saying what the credentials are.
+    // A host that has the database but not the Sheets variables looks perfectly
+    // healthy until 18:00, when the run fails somewhere nobody is watching.
+    // Names of missing variables only; never a value.
+    let sheets: string;
+    try {
+      sheets = sheetsConfig() ? 'ready' : 'not configured';
+    } catch (err) {
+      sheets = (err as Error).message;
+    }
+    const exportStatus = {
+      sheets,
+      cronSecret: Boolean(process.env.CRON_SECRET?.trim()),
+    };
     try {
       const rows = await listBySheet('Settings');
       return json(200, {
@@ -199,6 +213,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
         ...info,
         dbReachable: true,
         settingsRecords: rows.length,
+        export: exportStatus,
       });
     } catch (err) {
       return json(503, {
@@ -206,6 +221,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
         ...info,
         dbReachable: false,
         error: (err as Error).message,
+        export: exportStatus,
       });
     }
   }
