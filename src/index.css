@@ -4,8 +4,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Native widgets follow the app's theme, not the operating system's.
+   `color-scheme: light dark` said "this page handles both", which makes the
+   browser draw select popups, date pickers and scrollbars from the OS
+   preference. The app's theme is a class on <html> and can disagree — someone
+   on a dark Mac reading the app in light mode got a black dropdown over a white
+   table. Tying the declaration to the same class keeps the two in step. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
+}
+
+:root.dark {
+  color-scheme: dark;
 }
 
 html,
