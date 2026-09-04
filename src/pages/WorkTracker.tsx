@@ -45,7 +45,7 @@ import {
   isCommitmentField,
 } from '@/constants';
 import { useEditLock } from '@/hooks/useEditLock';
-import { istToday } from '@/lib/ist';
+import { formatIstDateTime, istToday } from '@/lib/ist';
 import { readTrackerActor, writeTrackerActor } from '@/lib/trackerIdentity';
 import { cn } from '@/lib/utils';
 import type { Task, TaskPriority, TaskStatus, User, WorkStaleness } from '@/types';
@@ -152,7 +152,7 @@ function TeamFreshness({
                 onClick={() => onSelect(person.userId)}
                 title={
                   person.lastUpdateAt
-                    ? `${person.userName}'s last identified update: ${new Date(person.lastUpdateAt).toLocaleString('en-IN')}`
+                    ? `${person.userName}'s last identified update: ${formatIstDateTime(person.lastUpdateAt)}`
                     : `${person.userName} has no identified update on their current open work`
                 }
                 className={cn(
@@ -1886,7 +1886,7 @@ function ActivityPanel({ task, onClose }: { task: Task | null; onClose: () => vo
                 )}
               </p>
               <p className="text-xs text-slate-400">
-                {new Date(a.changedAt).toLocaleString('en-IN')}
+                {formatIstDateTime(a.changedAt)}
               </p>
             </li>
           ))}

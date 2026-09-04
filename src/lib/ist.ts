@@ -66,3 +66,29 @@ export function describeDate(iso: string): string {
   if (delta === 1) return 'Tomorrow';
   return '';
 }
+
+/**
+ * A timestamp as the team reads it: IST, day first, 24-hour.
+ *
+ * `toLocaleString('en-IN')` was used for this and renders "3/9/2026, 11:01:13 pm".
+ * The rest of the app is 24-hour throughout — the Change Log's Time column, the
+ * consultation and event times, the export hour — so a 12-hour clock in two
+ * places was the odd one out, and "11:01 pm" next to a "23:01" in the same
+ * sheet is a real reading hazard.
+ *
+ * `hourCycle: 'h23'` rather than `hour12: false`, which renders midnight as
+ * 24:00 in several engines.
+ */
+export function formatIstDateTime(at: string | Date): string {
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: IST,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(d);
+}

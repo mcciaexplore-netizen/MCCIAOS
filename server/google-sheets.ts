@@ -190,13 +190,17 @@ export async function openSheet(cfg: SheetsConfig) {
     },
 
     async createTab(title: string): Promise<string> {
-      await call(cfg, token, ':batchUpdate', {
+      const res = await call<{
+        replies?: { addSheet?: { properties?: { sheetId?: number } } }[];
+      }>(cfg, token, ':batchUpdate', {
         method: 'POST',
         body: JSON.stringify({
           requests: [{ addSheet: { properties: { title } } }],
         }),
       });
-      tabs.set(title, -1);
+      // The real id, not a placeholder: anything addressing the tab by id —
+      // setting a column format, say — silently does nothing with -1.
+      tabs.set(title, res.replies?.[0]?.addSheet?.properties?.sheetId ?? -1);
       return title;
     },
 
@@ -233,6 +237,37 @@ export async function openSheet(cfg: SheetsConfig) {
       const range = encodeURIComponent(`${title}!A1:Z1`);
       const r = await call<{ values?: string[][] }>(cfg, token, `/values/${range}`);
       return r.values?.[0] ?? [];
+    },
+
+    /**
+     * Pins one column to a 24-hour clock.
+     *
+     * Sheets parses "23:01:13" into a time value and picks the display format
+     * from the spreadsheet's locale. That happens to render 24-hour under
+     * en_GB, and would render "11:01:13 PM" under en_US — so the format the
+     * team sees depends on a setting nobody in this app controls. Stating the
+     * pattern makes it the same everywhere.
+     *
+     * No am/pm token is the whole trick: Sheets renders hours 0-23 unless one
+     * is present.
+     */
+    async setTimeFormat(title: string, columnIndex: number): Promise<void> {
+      const sheetId = tabs.get(title);
+      if (sheetId === undefined || sheetId < 0) return;
+      await call(cfg, token, ':batchUpdate', {
+        method: 'POST',
+        body: JSON.stringify({
+          requests: [
+            {
+              repeatCell: {
+                range: { sheetId, startColumnIndex: columnIndex, endColumnIndex: columnIndex + 1 },
+                cell: { userEnteredFormat: { numberFormat: { type: 'TIME', pattern: 'hh:mm:ss' } } },
+                fields: 'userEnteredFormat.numberFormat',
+              },
+            },
+          ],
+        }),
+      });
     },
 
     /** Values already present in one column, used as stable sync markers. */

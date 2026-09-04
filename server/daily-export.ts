@@ -107,6 +107,9 @@ async function writeChangeLog(
   if (!tab) {
     tab = await sheet.createTab(LOG_TAB);
     created = true;
+    // Column B holds the time. Pin it before the first write, so the tab never
+    // exists in a state where the clock depends on the spreadsheet's locale.
+    await sheet.setTimeFormat(tab, 1);
   }
 
   // Unlike the nightly snapshots, this tab is an incremental audit stream.
