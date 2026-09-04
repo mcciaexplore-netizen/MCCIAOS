@@ -58,6 +58,7 @@ import { getOrgSettings, readOrgSettings, saveOrgSettings } from './org-settings
 import { orgSettingsSchema } from '../src/schemas/orgSettings.js';
 import { runDailyExport } from './daily-export.js';
 import { SheetsError } from './google-sheets.js';
+import { startLiveLog } from './live-log.js';
 import {
   getActivity,
   getAtRisk,
@@ -167,6 +168,13 @@ function toEntity(row: {
     updatedAt: row.updatedAt,
   };
 }
+
+// Follow task changes into the sheet's Change Log from the moment the API is
+// loaded. At module scope rather than per request: a serverless host reloads
+// this file per cold start, and registering inside the handler would re-register
+// on every call. The listener slot holds one function, so that would be
+// harmless but pointless.
+startLiveLog();
 
 export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
   const { method, pathname } = req;

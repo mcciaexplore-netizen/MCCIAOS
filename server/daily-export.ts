@@ -12,6 +12,7 @@
  * correcting a task late in the day.
  */
 import { listChangesThrough, listTasks, listUsers } from './work-tracker.js';
+import { LOG_HEADER, LOG_ID_COLUMN, LOG_TAB, LOG_TIME_COLUMN, logRow } from './change-log.js';
 import { openSheet, sheetsConfig, SheetsError } from './google-sheets.js';
 import { istDate } from '../src/lib/ist.js';
 import type { Task } from '../src/types/index.js';
@@ -51,45 +52,6 @@ function row(day: string, t: Task): (string | number | null)[] {
   ];
 }
 
-/**
- * The shared change-log tab: every edit anyone made that day, in one place.
- *
- * Separate from the per-person tabs because it answers a different question.
- * A person's tab says where their work stands tonight; this says what actually
- * moved today, and who moved it. Reviewing progress needs the second.
- */
-const LOG_TAB = 'Change Log';
-
-const LOG_HEADER = [
-  'Date',
-  'Time',
-  'Changed by',
-  'Whose work',
-  'Task',
-  'What changed',
-  'From',
-  'To',
-  'Entry ID',
-] as const;
-
-/** Field keys are for code. A report gets the words people use. */
-const FIELD_LABELS: Record<string, string> = {
-  title: 'Title',
-  userId: 'Owner',
-  priority: 'Priority',
-  status: 'Status',
-  allocationDate: 'Allocation date',
-  deadlineDate: 'Deadline',
-  percentage: 'Percentage',
-  reportTo: 'Reports to',
-  approverId: 'Approver',
-  members: 'Team',
-  created: 'Created',
-  deleted: 'Removed',
-  restored: 'Restored',
-  approval: 'Approval',
-};
-
 /** The workbook handle `openSheet` hands back. `Sheet` is one tab's properties. */
 type Workbook = Awaited<ReturnType<typeof openSheet>>;
 
@@ -109,33 +71,21 @@ async function writeChangeLog(
     created = true;
     // Column B holds the time. Pin it before the first write, so the tab never
     // exists in a state where the clock depends on the spreadsheet's locale.
-    await sheet.setTimeFormat(tab, 1);
+    await sheet.setTimeFormat(tab, LOG_TIME_COLUMN);
   }
 
   // Unlike the nightly snapshots, this tab is an incremental audit stream.
   // Stable database ids make a rerun safe while still allowing changes made
   // after an earlier same-day run to be appended on the next one.
-  const writtenIds = created ? new Set<string>() : new Set(await sheet.columnValues(tab, 'I'));
+  const writtenIds = created
+    ? new Set<string>()
+    : new Set(await sheet.columnValues(tab, LOG_ID_COLUMN));
   const pending = changes.filter((change) => !writtenIds.has(change.id));
   if (pending.length === 0) return { changes: 0, skipped: 'up to date' };
 
   const rows: (string | number | null)[][] = [];
   if (created || (await sheet.firstRow(tab)).length === 0) rows.push([...LOG_HEADER]);
-  for (const c of pending) {
-    rows.push([
-      c.day,
-      c.at,
-      // Blank, not "Unknown": the actor is genuinely unrecorded on older rows
-      // and inventing a name for a real edit would be worse than a gap.
-      c.actorName ?? '',
-      c.ownerName ?? '',
-      c.title,
-      FIELD_LABELS[c.field] ?? c.field,
-      c.oldValue ?? '',
-      c.newValue ?? '',
-      c.id,
-    ]);
-  }
+  for (const c of pending) rows.push(logRow(c));
   await sheet.append(tab, rows);
   return { changes: pending.length };
 }

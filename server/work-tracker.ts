@@ -361,6 +361,16 @@ export async function getTask(id: string): Promise<Task | null> {
 }
 
 /** One recorded change, flattened for a report rather than a task timeline. */
+/**
+ * One recorded change, carrying the row it happened to.
+ *
+ * The snapshot fields are the task as it stands when this is read, not as it
+ * stood at the moment of the change. For a live append those are the same
+ * instant. For the nightly backfill of an older entry they are not, so a row
+ * recovered days later shows today's percentage beside that day's edit. The
+ * From/To pair is the authoritative record of what actually moved; the
+ * snapshot is context.
+ */
 export interface ChangeRecord {
   id: string;
   day: string;
@@ -371,6 +381,15 @@ export interface ChangeRecord {
   field: string;
   oldValue: string | null;
   newValue: string | null;
+  // The tracker's own columns, so the log reads like the table it came from.
+  priority: string | null;
+  status: string | null;
+  allocationDate: string | null;
+  deadlineDate: string | null;
+  dueDays: number;
+  percentage: number | null;
+  reportToName: string | null;
+  approverName: string | null;
 }
 
 /**
@@ -385,7 +404,7 @@ export interface ChangeRecord {
  * rather than a join: old_value is free text, and casting it to uuid in SQL
  * fails the whole statement the moment one row holds a title.
  */
-export async function listChangesThrough(day: string): Promise<ChangeRecord[]> {
+async function readChanges(where: string, params: unknown[]): Promise<ChangeRecord[]> {
   const db = requireSql();
   const [activity, users] = await Promise.all([
     db.query(
@@ -394,14 +413,21 @@ export async function listChangesThrough(day: string): Promise<ChangeRecord[]> {
               to_char(a.changed_at at time zone 'Asia/Kolkata', 'HH24:MI:SS') as at,
               actor.name as actor_name, owner.name as owner_name,
               coalesce(a.task_title, t.title) as title,
-              a.field, a.old_value, a.new_value
+              a.field, a.old_value, a.new_value,
+              t.priority, t.status,
+              to_char(t.allocation_date, 'YYYY-MM-DD') as allocation_date,
+              to_char(t.deadline_date,   'YYYY-MM-DD') as deadline_date,
+              ${DUE_DAYS}::int as due_days,
+              t.percentage, ur.name as report_to_name, ua.name as approver_name
          from task_activity a
          join tasks t on t.id = a.task_id
          left join users actor on actor.id = a.actor_id
          left join users owner on owner.id = t.user_id
-        where (a.changed_at at time zone 'Asia/Kolkata')::date <= $1::date
+         left join users ur on ur.id = t.report_to
+         left join users ua on ua.id = t.approver_id
+        where ${where}
         order by a.changed_at`,
-      [day],
+      params,
     ),
     db.query(`select id, name from users`),
   ]);
@@ -428,8 +454,34 @@ export async function listChangesThrough(day: string): Promise<ChangeRecord[]> {
       field,
       oldValue: label(field, r.old_value),
       newValue: label(field, r.new_value),
+      priority: (r.priority as string | null) ?? null,
+      status: (r.status as string | null) ?? null,
+      allocationDate: (r.allocation_date as string | null) ?? null,
+      deadlineDate: (r.deadline_date as string | null) ?? null,
+      dueDays: Number(r.due_days ?? 0),
+      percentage: r.percentage == null ? null : Number(r.percentage),
+      reportToName: (r.report_to_name as string | null) ?? null,
+      approverName: (r.approver_name as string | null) ?? null,
     };
   });
+}
+
+/**
+ * Every change recorded up to and including an IST day.
+ *
+ * Deliberately not filtered by `LIVE`. A task that was removed is exactly the
+ * one whose history matters most, and its `deleted` entry is the only record
+ * that it ever existed.
+ */
+export async function listChangesThrough(day: string): Promise<ChangeRecord[]> {
+  return readChanges(`(a.changed_at at time zone 'Asia/Kolkata')::date <= $1::date`, [day]);
+}
+
+/** The same records, for a named set of entries — used by the live append. */
+export async function listChangesByIds(ids: string[]): Promise<ChangeRecord[]> {
+  const valid = ids.filter((id) => UUID_RE.test(id));
+  if (valid.length === 0) return [];
+  return readChanges(`a.id = any($1::uuid[])`, [valid]);
 }
 
 export async function getActivity(taskId: string): Promise<TaskActivity[]> {
@@ -613,6 +665,21 @@ export interface TaskWriteInput {
   percentage?: number | null;
 }
 
+/**
+ * Notified with the ids of rows just written to task_activity.
+ *
+ * A slot rather than a direct call because the Sheets client sits above this
+ * module: importing it here would close a cycle through daily-export. Whoever
+ * wants to observe changes registers at startup, and nothing here knows or
+ * cares what they do with them.
+ */
+type ActivityListener = (ids: string[]) => void;
+let activityListener: ActivityListener | null = null;
+
+export function onActivityRecorded(fn: ActivityListener | null): void {
+  activityListener = fn;
+}
+
 async function recordActivity(
   taskId: string,
   actorId: string | null,
@@ -634,12 +701,21 @@ async function recordActivity(
     return `($1::uuid, $2::uuid, $${start + 1}, $${start + 2}, $${start + 3},
              (select title from tasks where id = $1::uuid))`;
   });
-  await db.query(
+  const inserted = (await db.query(
     `insert into task_activity
        (task_id, actor_id, field, old_value, new_value, task_title)
-     values ${tuples.join(', ')}`,
+     values ${tuples.join(', ')}
+       returning id`,
     params,
-  );
+  )) as { id: string }[];
+
+  if (activityListener) {
+    try {
+      activityListener(inserted.map((r) => r.id));
+    } catch {
+      // An observer must never undo a write that has already succeeded.
+    }
+  }
 }
 
 export async function createTask(
