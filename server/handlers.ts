@@ -935,9 +935,14 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
       if (method !== 'POST' && !(method === 'GET' && byCron)) {
         return json(405, { error: 'Method not allowed' });
       }
-      if (secret && !byCron) {
+      // Either identity opens this: the cron with its secret, or a signed-in
+      // admin pressing Sync in Settings. It checked only the first, so setting
+      // CRON_SECRET — which the scheduled run requires — silently locked the
+      // button out with a 403 whose own message said the passcode would work.
+      const byAdmin = isAdmin(req.headers['cookie']);
+      if (!byCron && !byAdmin) {
         return json(403, {
-          error: 'The daily export needs the admin passcode, or the cron secret.',
+          error: 'Unlock Settings first, or present the cron secret.',
         });
       }
 

@@ -889,9 +889,11 @@ function WorkTrackerAdmin() {
               Daily export to Google Sheets
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Every evening at 18:00 IST each person&rsquo;s work is appended to
-              their own tab, and every old→new task update is synced to the shared
-              Change Log tab. Repeating the export does not duplicate log entries.
+              Every edit is recorded the moment it happens, whether or not the sheet
+              is reachable. Pressing Sync writes what is outstanding: each
+              person&rsquo;s work to their own tab, and every old&rarr;new change to
+              the shared Change Log. It also runs on its own at 18:00 IST. Syncing
+              twice never duplicates a row.
             </p>
           </div>
           <Button
@@ -899,7 +901,7 @@ function WorkTrackerAdmin() {
             size="sm"
             disabled={!unlocked || exportNow.isPending}
             onClick={() => exportNow.mutate(false)}
-            title={unlocked ? 'Write today to the sheet now' : 'Unlock above first'}
+            title={unlocked ? 'Write everything outstanding to the sheet now' : 'Unlock above first'}
             className="shrink-0"
           >
             {exportNow.isPending ? (
@@ -907,7 +909,7 @@ function WorkTrackerAdmin() {
             ) : (
               <Upload className="h-4 w-4" />
             )}
-            Run now
+            Sync to Sheets
           </Button>
         </div>
         {exportResult && (
