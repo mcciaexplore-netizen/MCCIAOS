@@ -26,6 +26,7 @@ import {
   TASK_STATUS_LOZENGE,
 } from '@/constants';
 import type { TaskPriority, TaskStatus, User } from '@/types';
+import { formatClock12 } from '@/lib/ist';
 
 // ---- Avatar ---------------------------------------------------------------
 
@@ -454,7 +455,7 @@ export function EditableTime({
         style={{ color: 'var(--n200)' }}
         className={cn(cellBase, 'tabular-nums')}
       >
-        {value ?? '—'}
+        {value ? formatClock12(value) : '—'}
       </button>
     </CellShell>
   );

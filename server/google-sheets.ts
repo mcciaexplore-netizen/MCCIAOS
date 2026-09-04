@@ -240,16 +240,15 @@ export async function openSheet(cfg: SheetsConfig) {
     },
 
     /**
-     * Pins one column to a 24-hour clock.
+     * Pins one column to a 12-hour clock.
      *
      * Sheets parses "23:01:13" into a time value and picks the display format
-     * from the spreadsheet's locale. That happens to render 24-hour under
-     * en_GB, and would render "11:01:13 PM" under en_US — so the format the
-     * team sees depends on a setting nobody in this app controls. Stating the
-     * pattern makes it the same everywhere.
+     * from the spreadsheet's locale, so the clock the team sees would otherwise
+     * depend on a setting nobody in this app controls — 24-hour under en_GB,
+     * 12-hour under en_US. Stating the pattern makes it the same for everyone.
      *
-     * No am/pm token is the whole trick: Sheets renders hours 0-23 unless one
-     * is present.
+     * The am/pm token is what selects a 12-hour clock; Sheets renders hours
+     * 0-23 without one. The value stored underneath is unaffected either way.
      */
     async setTimeFormat(title: string, columnIndex: number): Promise<void> {
       const sheetId = tabs.get(title);
@@ -261,7 +260,7 @@ export async function openSheet(cfg: SheetsConfig) {
             {
               repeatCell: {
                 range: { sheetId, startColumnIndex: columnIndex, endColumnIndex: columnIndex + 1 },
-                cell: { userEnteredFormat: { numberFormat: { type: 'TIME', pattern: 'hh:mm:ss' } } },
+                cell: { userEnteredFormat: { numberFormat: { type: 'TIME', pattern: 'h:mm:ss am/pm' } } },
                 fields: 'userEnteredFormat.numberFormat',
               },
             },

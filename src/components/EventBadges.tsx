@@ -13,6 +13,7 @@ import {
 } from '@/constants';
 import type { EventMode, EventStatus, EventType } from '@/types';
 import type { ReactNode } from 'react';
+import { formatClock12 } from '@/lib/ist';
 
 export const TypeBadge = ({ type }: { type: EventType }) => (
   <Badge tone={EVENT_TYPE_TONES[type]}>{EVENT_TYPE_LABELS[type]}</Badge>
@@ -34,14 +35,16 @@ export function formatRate(rate: number | null): string {
   return rate === null ? '—' : `${rate}%`;
 }
 
-/** "09:30 – 12:00", "from 09:30", or empty when no times were recorded. */
+/** "9:30 am – 12:00 pm", "from 9:30 am", or empty when no times were recorded. */
 export function formatTimeRange(
   start: string | null,
   end: string | null,
 ): string {
-  if (start && end) return `${start} – ${end}`;
-  if (start) return `from ${start}`;
-  if (end) return `until ${end}`;
+  const s = formatClock12(start);
+  const e = formatClock12(end);
+  if (s && e) return `${s} – ${e}`;
+  if (s) return `from ${s}`;
+  if (e) return `until ${e}`;
   return '';
 }
 

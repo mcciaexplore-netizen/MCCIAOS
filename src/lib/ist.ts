@@ -68,16 +68,11 @@ export function describeDate(iso: string): string {
 }
 
 /**
- * A timestamp as the team reads it: IST, day first, 24-hour.
+ * A timestamp as the team reads it: IST, day first, 12-hour.
  *
- * `toLocaleString('en-IN')` was used for this and renders "3/9/2026, 11:01:13 pm".
- * The rest of the app is 24-hour throughout — the Change Log's Time column, the
- * consultation and event times, the export hour — so a 12-hour clock in two
- * places was the odd one out, and "11:01 pm" next to a "23:01" in the same
- * sheet is a real reading hazard.
- *
- * `hourCycle: 'h23'` rather than `hour12: false`, which renders midnight as
- * 24:00 in several engines.
+ * Pinned to IST rather than left to the viewer's zone, which is what
+ * `toLocaleString('en-IN')` did here before — the same activity row read
+ * differently depending on where it was opened.
  */
 export function formatIstDateTime(at: string | Date): string {
   const d = at instanceof Date ? at : new Date(at);
@@ -87,8 +82,31 @@ export function formatIstDateTime(at: string | Date): string {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
-    hourCycle: 'h23',
+    hour12: true,
   }).format(d);
+}
+
+/**
+ * A stored "HH:MM" or "HH:MM:SS" as a 12-hour clock: "14:30" reads "2:30 pm".
+ *
+ * Storage and transport stay 24-hour on purpose. `<input type="time">` accepts
+ * and emits "HH:MM" in 24-hour form no matter how the browser draws its picker,
+ * so a 12-hour value in the database would break every time field in the app.
+ * The clock is a display concern and is converted here, at the edge.
+ *
+ * Anything unparseable is handed back untouched rather than blanked — a
+ * surprising stored value should still be visible to whoever has to fix it.
+ */
+export function formatClock12(value: string | null | undefined): string {
+  if (!value) return '';
+  const m = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$/.exec(value.trim());
+  if (!m) return value;
+  const hour = Number(m[1]);
+  if (hour > 23) return value;
+  const suffix = hour < 12 ? 'am' : 'pm';
+  // 0 and 12 both show as 12: midnight is 12 am, noon is 12 pm.
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:${m[2]}${m[3] ? `:${m[3]}` : ''} ${suffix}`;
 }
