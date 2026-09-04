@@ -477,13 +477,6 @@ export async function listChangesThrough(day: string): Promise<ChangeRecord[]> {
   return readChanges(`(a.changed_at at time zone 'Asia/Kolkata')::date <= $1::date`, [day]);
 }
 
-/** The same records, for a named set of entries — used by the live append. */
-export async function listChangesByIds(ids: string[]): Promise<ChangeRecord[]> {
-  const valid = ids.filter((id) => UUID_RE.test(id));
-  if (valid.length === 0) return [];
-  return readChanges(`a.id = any($1::uuid[])`, [valid]);
-}
-
 export async function getActivity(taskId: string): Promise<TaskActivity[]> {
   if (!UUID_RE.test(taskId)) return [];
   const db = requireSql();
@@ -665,21 +658,6 @@ export interface TaskWriteInput {
   percentage?: number | null;
 }
 
-/**
- * Notified with the ids of rows just written to task_activity.
- *
- * A slot rather than a direct call because the Sheets client sits above this
- * module: importing it here would close a cycle through daily-export. Whoever
- * wants to observe changes registers at startup, and nothing here knows or
- * cares what they do with them.
- */
-type ActivityListener = (ids: string[]) => void;
-let activityListener: ActivityListener | null = null;
-
-export function onActivityRecorded(fn: ActivityListener | null): void {
-  activityListener = fn;
-}
-
 async function recordActivity(
   taskId: string,
   actorId: string | null,
@@ -701,21 +679,12 @@ async function recordActivity(
     return `($1::uuid, $2::uuid, $${start + 1}, $${start + 2}, $${start + 3},
              (select title from tasks where id = $1::uuid))`;
   });
-  const inserted = (await db.query(
+  await db.query(
     `insert into task_activity
        (task_id, actor_id, field, old_value, new_value, task_title)
-     values ${tuples.join(', ')}
-       returning id`,
+     values ${tuples.join(', ')}`,
     params,
-  )) as { id: string }[];
-
-  if (activityListener) {
-    try {
-      activityListener(inserted.map((r) => r.id));
-    } catch {
-      // An observer must never undo a write that has already succeeded.
-    }
-  }
+  );
 }
 
 export async function createTask(
