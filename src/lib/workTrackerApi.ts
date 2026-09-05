@@ -149,15 +149,22 @@ export const trackerApi = {
     return request<TodayCounts>(`/api/today?${qs({ user })}`);
   },
 
-  callingStatus(user?: string) {
-    return request<{ people: CallingStatus[] }>(`/api/calling-status?${qs({ user })}`);
+  callingStatus(user?: string, day?: string) {
+    return request<{ day: string | null; people: CallingStatus[] }>(
+      `/api/calling-status?${qs({ user, day })}`,
+    );
   },
 
-  /** One figure for one person. See server/calling-status.ts for why not the row. */
-  setCallingField(userId: string, field: string, value: number | null) {
+  /** One figure, for one person, on one day. See server/calling-status.ts. */
+  setCallingField(
+    userId: string,
+    field: string,
+    value: number | null,
+    day?: string,
+  ) {
     return request<{ person: CallingStatus }>('/api/calling-status', {
       method: 'PATCH',
-      body: JSON.stringify({ userId, field, value }),
+      body: JSON.stringify({ userId, field, value, day: day ?? null }),
     });
   },
 
@@ -209,6 +216,7 @@ export const trackerApi = {
       skipped: number;
       people: { name: string; tab: string; tasks: number; created: boolean; skipped?: string }[];
       log: { changes: number; skipped?: string };
+      calling: { rows: number; skipped?: string };
     }>(`/api/export/daily${force ? '?force=true' : ''}`, {
       method: 'POST',
       authorised: true,

@@ -920,6 +920,8 @@ function WorkTrackerAdmin() {
               {exportResult.skipped > 0 && `, ${exportResult.skipped} skipped`}
               {`; ${exportResult.log.changes} change${exportResult.log.changes === 1 ? '' : 's'} added to Change Log`}
               {exportResult.log.skipped && ` (${exportResult.log.skipped})`}
+              {`; ${exportResult.calling.rows} calling row${exportResult.calling.rows === 1 ? '' : 's'}`}
+              {exportResult.calling.skipped && ` (${exportResult.calling.skipped})`}
             </p>
             <ul className="mt-1 space-y-0.5 text-slate-500 dark:text-slate-400">
               {exportResult.people.map((p) => (

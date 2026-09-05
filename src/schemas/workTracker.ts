@@ -150,6 +150,8 @@ export const callingUpdateSchema = z.object({
   userId: uuid,
   field: z.enum(CALLING_FIELDS),
   value: count,
+  /** Which day's figures. Omitted means today, in IST. */
+  day: nullableDate,
 });
 
 export type CallingUpdateInput = z.infer<typeof callingUpdateSchema>;

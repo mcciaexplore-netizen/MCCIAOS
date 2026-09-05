@@ -356,12 +356,14 @@ export interface Consultation {
 /**
  * One person's calling tally.
  *
- * Every count is nullable and nullable means "nothing recorded", which is not
- * the same statement as 0. A person given no calls today and a person given
- * calls who picked up none are different facts, and the table shows the
- * difference.
+ * One of these per person per day. Every count is nullable and null means
+ * "nothing recorded", which is not the statement 0 makes: a person given no
+ * calls and a person given calls who picked up none are different facts, and
+ * the table shows the difference.
  */
 export interface CallingStatus {
+  /** The IST day these figures are for, YYYY-MM-DD. */
+  statusDate: string;
   userId: string;
   userName: string;
   colour: string | null;

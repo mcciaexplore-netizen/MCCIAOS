@@ -990,7 +990,10 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     // updates as they go, not records anybody has to be trusted with.
     if (pathname === '/api/calling-status') {
       if (method === 'GET') {
-        return json(200, { people: await listCallingStatus(query.get('user')) });
+        return json(200, {
+          day: query.get('day'),
+          people: await listCallingStatus(query.get('user'), query.get('day')),
+        });
       }
       if (method === 'PATCH') {
         const parsed = callingUpdateSchema.safeParse(camelBody(req.body));
@@ -1000,6 +1003,7 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
           parsed.data.userId,
           parsed.data.field,
           parsed.data.value ?? null,
+          parsed.data.day ?? null,
         );
         // Only somebody on the roster has a tally; an unknown id is the
         // caller's mistake, not an empty result.

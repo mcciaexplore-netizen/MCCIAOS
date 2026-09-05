@@ -12,6 +12,7 @@
  * correcting a task late in the day.
  */
 import { listChangesThrough, listTasks, listUsers } from './work-tracker.js';
+import { listCallingStatus } from './calling-status.js';
 import { LOG_HEADER, LOG_ID_COLUMN, LOG_TAB, LOG_TIME_COLUMN, logRow } from './change-log.js';
 import { openSheet, sheetsConfig, SheetsError } from './google-sheets.js';
 import { istDate } from '../src/lib/ist.js';
@@ -90,6 +91,72 @@ async function writeChangeLog(
   return { changes: pending.length };
 }
 
+/**
+ * The calling tab: one row per person per day, appended as each day is written.
+ *
+ * A shared tab rather than one per person, because calling is read across the
+ * team — who was given what, and how it went — in a way an individual's task
+ * list is not.
+ *
+ * Somebody with nothing recorded is skipped. A row of four blanks says only
+ * that a person exists, which the roster already says, and a tab of them buries
+ * the days that do carry figures.
+ */
+const CALLING_TAB = 'Calling Status';
+
+const CALLING_HEADER = [
+  'Date',
+  'Name',
+  'Calls Allocated',
+  'Calls Picked',
+  'Consultation Scheduled',
+  'Not Picked',
+] as const;
+
+async function writeCallingStatus(
+  sheet: Workbook,
+  day: string,
+): Promise<{ rows: number; skipped?: string }> {
+  const people = (await listCallingStatus(null, day)).filter(
+    (p) =>
+      p.callsAllocated !== null ||
+      p.callsPicked !== null ||
+      p.consultationScheduled !== null ||
+      p.notPicked !== null,
+  );
+  if (people.length === 0) return { rows: 0, skipped: 'nothing recorded' };
+
+  let tab = sheet.find(CALLING_TAB);
+  let created = false;
+  if (!tab) {
+    tab = await sheet.createTab(CALLING_TAB);
+    created = true;
+  }
+  // Written once per day, like the per-person tabs: the figures are a day's
+  // final state, not a stream of edits, so re-running must not append a second
+  // copy of the same day.
+  if (!created && (await sheet.lastDate(tab)) === day) {
+    return { rows: people.length, skipped: 'already written today' };
+  }
+
+  const rows: (string | number | null)[][] = [];
+  if (created || (await sheet.firstRow(tab)).length === 0) rows.push([...CALLING_HEADER]);
+  for (const p of people) {
+    rows.push([
+      day,
+      p.userName,
+      // Blank rather than 0 for a figure nobody entered, matching the app: a
+      // person given no calls and a person who picked none up are different.
+      p.callsAllocated ?? '',
+      p.callsPicked ?? '',
+      p.consultationScheduled ?? '',
+      p.notPicked ?? '',
+    ]);
+  }
+  await sheet.append(tab, rows);
+  return { rows: people.length };
+}
+
 export interface ExportOutcome {
   day: string;
   spreadsheetId: string;
@@ -97,6 +164,7 @@ export interface ExportOutcome {
   written: number;
   skipped: number;
   log: { changes: number; skipped?: string };
+  calling: { rows: number; skipped?: string };
 }
 
 export async function runDailyExport(
@@ -121,6 +189,7 @@ export async function runDailyExport(
     written: 0,
     skipped: 0,
     log: { changes: 0 },
+    calling: { rows: 0 },
   };
 
   for (const person of people) {
@@ -167,6 +236,7 @@ export async function runDailyExport(
 
   // After the per-person tabs, so a failure here still leaves everybody's work
   // recorded rather than losing the whole run to the log.
+  outcome.calling = await writeCallingStatus(sheet, day);
   outcome.log = await writeChangeLog(sheet, day);
 
   return outcome;
