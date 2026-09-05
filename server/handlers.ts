@@ -138,12 +138,37 @@ const UNDEFINED_TABLE = '42P01';
  * Everything else stays opaque on purpose — a raw Postgres error names tables,
  * columns and constraints, which is nothing the client should see.
  */
+/**
+ * Which file creates which table.
+ *
+ * A module is not one migration any more. The Work Tracker handler covers
+ * tasks, consultations and calling status, each with its own file, so reporting
+ * the module's original migration for any missing table sent people to run
+ * db/work-tracker.sql when the table that was actually absent was
+ * calling_status — a file that would have reported everything already existed
+ * and left them no better off.
+ */
+const TABLE_MIGRATIONS: Record<string, string> = {
+  calling_status: 'db/calling-status.sql',
+  consultations: 'db/consultations.sql',
+  task_members: 'db/task-members.sql',
+  org_settings: 'db/org-settings.sql',
+  events: 'db/events.sql',
+  event_participants: 'db/events.sql',
+};
+
 function moduleFailure(err: unknown, label: string, migration: string): ApiResponse {
   if ((err as { code?: string }).code === UNDEFINED_TABLE) {
+    // Postgres names the relation in the message: relation "x" does not exist.
+    const named = /relation "([^"]+)" does not exist/.exec(
+      (err as { message?: string }).message ?? '',
+    )?.[1];
+    const file = (named && TABLE_MIGRATIONS[named]) ?? migration;
+    const what = named ? `The "${named}" table` : `The ${label} tables`;
     // eslint-disable-next-line no-console
-    console.error(`[${label}] missing tables — run ${migration}`, err);
+    console.error(`[${label}] missing table ${named ?? '(unnamed)'} — run ${file}`, err);
     return json(503, {
-      error: `The ${label} tables have not been created yet. Run ${migration} against the database, then reload.`,
+      error: `${what} has not been created yet. Run ${file} against the database, then reload.`,
     });
   }
   // eslint-disable-next-line no-console
