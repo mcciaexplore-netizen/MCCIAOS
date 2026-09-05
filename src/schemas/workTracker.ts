@@ -127,3 +127,29 @@ export const consultationSchema = consultationFields;
 export const consultationUpdateSchema = consultationFields.partial();
 export type ConsultationInput = z.infer<typeof consultationSchema>;
 export type ConsultationUpdateInput = z.infer<typeof consultationUpdateSchema>;
+
+// ---- Calling status ---------------------------------------------------------
+// One tally per person, edited a cell at a time. Deliberately not gated by the
+// admin passcode — see db/calling-status.sql.
+
+export const CALLING_FIELDS = [
+  'callsAllocated',
+  'callsPicked',
+  'consultationScheduled',
+  'notPicked',
+] as const;
+
+/**
+ * A single cell edit: whose tally, which figure, what it is now.
+ *
+ * One field per request rather than the whole row, so two people editing
+ * different columns at the same moment cannot overwrite each other — which a
+ * whole-row write from a stale table would do without saying so.
+ */
+export const callingUpdateSchema = z.object({
+  userId: uuid,
+  field: z.enum(CALLING_FIELDS),
+  value: count,
+});
+
+export type CallingUpdateInput = z.infer<typeof callingUpdateSchema>;

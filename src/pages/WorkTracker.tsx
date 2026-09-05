@@ -17,6 +17,7 @@ import {
   Trash2,
   Users2,
   X,
+  PhoneCall,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button, Card, EmptyState, ErrorState, Input, Modal, Select } from '@/components/ui';
@@ -33,6 +34,7 @@ import {
   formatJiraDate,
   DueDays,
 } from '@/components/TrackerCells';
+import { CallingStatusTable } from '@/components/CallingStatusTable';
 import { ConsultationsTable } from '@/components/ConsultationsTable';
 import { TeamOnTask } from '@/components/TeamOnTask';
 import { useToast } from '@/components/Toast';
@@ -224,8 +226,12 @@ function useTrackerParams() {
    * Which table is on screen. In the URL like everything else here, so a link
    * to the consultations view is shareable and survives a refresh.
    */
-  const view: 'work' | 'consultations' =
-    params.get('view') === 'consultations' ? 'consultations' : 'work';
+  const view: 'work' | 'consultations' | 'calling' =
+    params.get('view') === 'consultations'
+      ? 'consultations'
+      : params.get('view') === 'calling'
+        ? 'calling'
+        : 'work';
 
   const set = useCallback(
     (next: Record<string, string>) => {
@@ -647,10 +653,11 @@ export default function WorkTracker() {
           at-risk is the chip below. */}
       <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="inline-flex gap-1 rounded-full bg-slate-100 p-1 dark:bg-slate-800">
-          {view === 'consultations' ? (
-            <ViewSwitch onBack={() => set({ view: '' })} />
-          ) : (
-            <></>
+          {view !== 'work' && (
+            <ViewSwitch
+              label={view === 'calling' ? 'Calling Status' : 'Consultations'}
+              onBack={() => set({ view: '' })}
+            />
           )}
           {view === 'work' &&
             TABS.filter((t) => t.key !== 'assigned_to_me' || user).map((t) => {
@@ -779,6 +786,19 @@ export default function WorkTracker() {
               <Users2 className="h-4 w-4" /> Group
             </Button>
           )}
+          {/* Between the person selector and Add Consultation: it is a way of
+              looking at the team, like the selector, not a way of adding a record
+              like the two buttons after it. */}
+          <Button
+            variant={view === 'calling' ? 'primary' : 'secondary'}
+            onClick={() => {
+              set({ view: view === 'calling' ? '' : 'calling' });
+              setAdding(false);
+              setAddingConsultation(false);
+            }}
+          >
+            <PhoneCall className="h-4 w-4" /> Calling Status
+          </Button>
           {/* Beside New task, because the two are the same kind of act: putting
               a new record in. Which table it lands in is the difference. */}
           <Button
@@ -819,7 +839,9 @@ export default function WorkTracker() {
       )}
 
       <Card className="overflow-hidden">
-        {view === 'consultations' ? (
+        {view === 'calling' ? (
+          <CallingStatusTable user={user} />
+        ) : view === 'consultations' ? (
           <ConsultationsTable
             users={users}
             user={user}
@@ -1332,10 +1354,10 @@ function RowSelect({ className, ...props }: React.SelectHTMLAttributes<HTMLSelec
 }
 
 /**
- * Shown in place of the work tabs while the consultations table is up: says
- * which table you are looking at, and gets you back.
+ * Shown in place of the work tabs while a table other than Work is up: says
+ * which one you are looking at, and gets you back.
  */
-function ViewSwitch({ onBack }: { onBack: () => void }) {
+function ViewSwitch({ label, onBack }: { label: string; onBack: () => void }) {
   return (
     <>
       <button
@@ -1345,7 +1367,7 @@ function ViewSwitch({ onBack }: { onBack: () => void }) {
         Work
       </button>
       <span className="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-900 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700">
-        Consultations
+        {label}
       </span>
     </>
   );

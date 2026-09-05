@@ -16,11 +16,13 @@ import {
   TASK_STATUSES,
   taskSchema,
   taskUpdateSchema,
+  callingUpdateSchema,
   consultationSchema,
   consultationUpdateSchema,
   userSchema,
   userUpdateSchema,
 } from '../src/schemas/workTracker.js';
+import { listCallingStatus, setCallingField } from './calling-status.js';
 import { parseCsv, toCsv } from '../src/lib/csv.js';
 import { isIsoDate } from '../src/lib/ist.js';
 import {
@@ -439,6 +441,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     pathname.startsWith('/api/users') ||
     pathname === '/api/task-counts' ||
     pathname.startsWith('/api/consultations') ||
+    pathname === '/api/calling-status' ||
     pathname === '/api/export/daily' ||
     pathname === '/api/summary' ||
     pathname === '/api/today' ||
@@ -957,6 +960,30 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     // NOT passcode-gated, unlike tasks. These are running tallies the person
     // who took the consultation updates through the day; asking for a passcode
     // to correct a count would only teach everyone to leave the app unlocked.
+    // ---- /api/calling-status -----------------------------------------------
+    // Open, like consultations: running tallies the person doing the calling
+    // updates as they go, not records anybody has to be trusted with.
+    if (pathname === '/api/calling-status') {
+      if (method === 'GET') {
+        return json(200, { people: await listCallingStatus(query.get('user')) });
+      }
+      if (method === 'PATCH') {
+        const parsed = callingUpdateSchema.safeParse(camelBody(req.body));
+        if (!parsed.success)
+          return json(422, { error: 'Validation failed', issues: parsed.error.issues });
+        const person = await setCallingField(
+          parsed.data.userId,
+          parsed.data.field,
+          parsed.data.value ?? null,
+        );
+        // Only somebody on the roster has a tally; an unknown id is the
+        // caller's mistake, not an empty result.
+        if (!person) return json(404, { error: 'No such person' });
+        return json(200, { person });
+      }
+      return json(405, { error: 'Method not allowed' });
+    }
+
     if (pathname === '/api/consultations') {
       if (method === 'GET') {
         return json(200, {

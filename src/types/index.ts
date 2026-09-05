@@ -352,3 +352,23 @@ export interface Consultation {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * One person's calling tally.
+ *
+ * Every count is nullable and nullable means "nothing recorded", which is not
+ * the same statement as 0. A person given no calls today and a person given
+ * calls who picked up none are different facts, and the table shows the
+ * difference.
+ */
+export interface CallingStatus {
+  userId: string;
+  userName: string;
+  colour: string | null;
+  callsAllocated: number | null;
+  callsPicked: number | null;
+  consultationScheduled: number | null;
+  notPicked: number | null;
+  /** When the tally last moved. Null for somebody who has never had one. */
+  updatedAt: string | null;
+}

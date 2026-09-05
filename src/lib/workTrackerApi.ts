@@ -10,6 +10,7 @@ import type {
   TaskTabCounts,
   TodayCounts,
   User,
+  CallingStatus,
   WorkStaleness,
 } from '@/types';
 import type {
@@ -146,6 +147,18 @@ export const trackerApi = {
 
   today(user?: string) {
     return request<TodayCounts>(`/api/today?${qs({ user })}`);
+  },
+
+  callingStatus(user?: string) {
+    return request<{ people: CallingStatus[] }>(`/api/calling-status?${qs({ user })}`);
+  },
+
+  /** One figure for one person. See server/calling-status.ts for why not the row. */
+  setCallingField(userId: string, field: string, value: number | null) {
+    return request<{ person: CallingStatus }>('/api/calling-status', {
+      method: 'PATCH',
+      body: JSON.stringify({ userId, field, value }),
+    });
   },
 
   staleness(afterDays = 1) {
