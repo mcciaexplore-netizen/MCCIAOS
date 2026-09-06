@@ -3,6 +3,11 @@
     { "source": "/api/(.*)", "destination": "/api/[...path]" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
+  "functions": {
+    "api/[...path].ts": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     { "path": "/api/export/daily", "schedule": "30 12 * * *" }
   ]

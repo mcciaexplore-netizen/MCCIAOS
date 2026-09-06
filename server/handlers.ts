@@ -59,7 +59,7 @@ import {
 import { getOrgSettings, readOrgSettings, saveOrgSettings } from './org-settings.js';
 import { orgSettingsSchema } from '../src/schemas/orgSettings.js';
 import { runDailyExport } from './daily-export.js';
-import { SheetsError, sheetsConfig } from './google-sheets.js';
+import { SheetsError, sheetsConfig, sheetsKeyUsable } from './google-sheets.js';
 import {
   getActivity,
   getAtRisk,
@@ -217,7 +217,15 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     // Names of missing variables only; never a value.
     let sheets: string;
     try {
-      sheets = sheetsConfig() ? 'ready' : 'not configured';
+      // Does the key sign, not merely exist. Reporting "ready" for a key that
+      // cannot sign is worse than reporting nothing: a green light on a job
+      // that fails every night.
+      if (!sheetsConfig()) {
+        sheets = 'not configured';
+      } else {
+        const usable = sheetsKeyUsable();
+        sheets = usable.ok ? 'ready' : usable.reason;
+      }
     } catch (err) {
       sheets = (err as Error).message;
     }
@@ -977,7 +985,14 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
         return json(200, await runDailyExport({ force }));
       } catch (err) {
         if (err instanceof SheetsError) return json(err.status, { error: err.message });
-        throw err;
+        // Say what broke. Every other route stays opaque because a raw error
+        // names tables and columns a client should not see; this one is
+        // reachable only by the cron or a signed-in admin, and its failures are
+        // configuration, not data. Three days of silent 18:00 failures behind
+        // "Something went wrong" is what that opacity bought.
+        // eslint-disable-next-line no-console
+        console.error('[export] failed', err);
+        return json(500, { error: `The export failed: ${(err as Error).message}` });
       }
     }
 

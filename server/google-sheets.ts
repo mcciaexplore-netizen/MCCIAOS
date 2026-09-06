@@ -60,10 +60,20 @@ export function sheetsConfig(): SheetsConfig | null {
     throw new SheetsError(`Sheets export is half-configured. Missing: ${missing.join(', ')}`, 500);
   }
 
+  // The key is copied out of a JSON file, where it is a quoted string. Paste it
+  // into a dashboard field that does not want quotes and the quotes come along,
+  // and every later check still passes: the value contains BEGIN PRIVATE KEY,
+  // so it looks configured, and only the signature fails — at 18:00, in a log
+  // nobody reads. Strip them rather than let that be somebody's evening.
+  let key = rawKey!;
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1);
+  }
+
   // Environment variables cannot hold real newlines on most hosts, so the PEM
   // is stored with them escaped. Accept both forms rather than making the
   // person deploying guess which one this wants.
-  const privateKey = rawKey!.includes('\\n') ? rawKey!.replace(/\\n/g, '\n') : rawKey!;
+  const privateKey = key.includes('\\n') ? key.replace(/\\n/g, '\n') : key;
   if (!privateKey.includes('BEGIN PRIVATE KEY')) {
     throw new SheetsError(
       'GOOGLE_PRIVATE_KEY does not look like a PEM key. Copy the whole private_key value from the service account JSON, including the BEGIN/END lines.',
@@ -71,6 +81,37 @@ export function sheetsConfig(): SheetsConfig | null {
     );
   }
   return { email: email!, privateKey, spreadsheetId: spreadsheetId! };
+}
+
+/**
+ * Whether the credentials actually work, rather than whether they are present.
+ *
+ * `sheetsConfig` only proves the variables exist and the key contains the right
+ * header. A key that cannot sign passes all of that and reports "ready", which
+ * is exactly what happened here: health said the export was fine for three days
+ * while every scheduled run threw, and the first sign of trouble was an empty
+ * spreadsheet on the fourth morning.
+ *
+ * Signing is local and costs nothing — no network, no Google. It is the
+ * cheapest question that distinguishes "configured" from "working".
+ */
+export function sheetsKeyUsable(): { ok: true } | { ok: false; reason: string } {
+  let cfg: SheetsConfig | null;
+  try {
+    cfg = sheetsConfig();
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+  if (!cfg) return { ok: false, reason: 'not configured' };
+  try {
+    createSign('RSA-SHA256').update('probe').sign(cfg.privateKey, 'base64');
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `GOOGLE_PRIVATE_KEY is present but cannot sign: ${(err as Error).message}`,
+    };
+  }
 }
 
 function base64url(input: string | Buffer): string {
