@@ -100,7 +100,8 @@ async function writeChangeLog(
  *
  * Somebody with nothing recorded is skipped. A row of four blanks says only
  * that a person exists, which the roster already says, and a tab of them buries
- * the days that do carry figures.
+ * the days that do carry figures. The tab itself is created regardless, so it
+ * is visible and waiting rather than absent until the first person calls.
  */
 const CALLING_TAB = 'Calling Status';
 
@@ -124,23 +125,30 @@ async function writeCallingStatus(
       p.consultationScheduled !== null ||
       p.notPicked !== null,
   );
-  if (people.length === 0) return { rows: 0, skipped: 'nothing recorded' };
 
+  // The tab is created on the first export whether or not anybody has called
+  // yet, and it used to wait for figures. A missing tab reads as a broken
+  // feature; an empty one under its headings reads as a day nobody logged,
+  // which is the truth. Only the rows wait for data.
   let tab = sheet.find(CALLING_TAB);
   let created = false;
   if (!tab) {
     tab = await sheet.createTab(CALLING_TAB);
     created = true;
   }
+  const needsHeader = created || (await sheet.firstRow(tab)).length === 0;
+  if (needsHeader) await sheet.append(tab, [[...CALLING_HEADER]]);
+
+  if (people.length === 0) return { rows: 0, skipped: 'nothing recorded' };
+
   // Written once per day, like the per-person tabs: the figures are a day's
   // final state, not a stream of edits, so re-running must not append a second
   // copy of the same day.
-  if (!created && (await sheet.lastDate(tab)) === day) {
+  if (!needsHeader && (await sheet.lastDate(tab)) === day) {
     return { rows: people.length, skipped: 'already written today' };
   }
 
   const rows: (string | number | null)[][] = [];
-  if (created || (await sheet.firstRow(tab)).length === 0) rows.push([...CALLING_HEADER]);
   for (const p of people) {
     rows.push([
       day,
