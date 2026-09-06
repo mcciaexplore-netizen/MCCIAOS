@@ -356,6 +356,32 @@ export function EditableNumber({
     onSave(n);
   };
 
+  /**
+   * Typing is enough. A number left in a cell saves itself shortly after the
+   * person stops typing, rather than waiting for Enter or for focus to move.
+   *
+   * Enter and blur still commit at once, so nothing about the deliberate path
+   * changes. What this removes is the silent one: typing a figure and then
+   * reloading, switching day, or closing the tab used to discard it with no
+   * indication it had not been saved, and the cell had every appearance of
+   * holding a value.
+   *
+   * A ref holds the latest commit so the timer never fires a stale closure over
+   * an older draft.
+   */
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+
+  useEffect(() => {
+    const text = draft.trim();
+    // Nothing pending: the draft already matches what was last saved.
+    const settled =
+      text === '' ? committed.current === null : Number(text) === committed.current;
+    if (settled) return;
+    const timer = setTimeout(() => commitRef.current(), 700);
+    return () => clearTimeout(timer);
+  }, [draft]);
+
   return (
     <CellShell saving={saving} error={local ?? error}>
       <span className="flex min-w-0 items-center">
