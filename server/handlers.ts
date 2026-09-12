@@ -60,6 +60,7 @@ import { getOrgSettings, readOrgSettings, saveOrgSettings } from './org-settings
 import { orgSettingsSchema } from '../src/schemas/orgSettings.js';
 import { runDailyExport } from './daily-export.js';
 import { SheetsError, sheetsConfig, sheetsKeyUsable } from './google-sheets.js';
+import { mailConfig } from './mailer.js';
 import {
   getActivity,
   getAtRisk,
@@ -229,8 +230,19 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     } catch (err) {
       sheets = (err as Error).message;
     }
+    // Presence and shape only, like `sheetsConfig` — not a live Gmail login.
+    // A health check that dialled out to Gmail on every hit would make an
+    // uptime monitor's polling into unwanted SMTP traffic; `npm run mail:check`
+    // (or the digest itself) is where a real login gets tried.
+    let mail: string;
+    try {
+      mail = mailConfig() ? 'configured' : 'not configured';
+    } catch (err) {
+      mail = (err as Error).message;
+    }
     const exportStatus = {
       sheets,
+      mail,
       cronSecret: Boolean(process.env.CRON_SECRET?.trim()),
     };
     try {
