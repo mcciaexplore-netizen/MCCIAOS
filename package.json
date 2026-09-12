@@ -10,7 +10,9 @@
     "typecheck": "tsc -b --noEmit",
     "logo": "node scripts/set-logo.mjs",
     "sheets:check": "node scripts/check-sheets.mjs",
-    "mail:check": "node scripts/check-mail.mjs"
+    "mail:check": "node scripts/check-mail.mjs",
+    "audit:clutter": "python3 scripts/project_cleanup.py .",
+    "audit:context": "python3 scripts/project_intake.py ."
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",

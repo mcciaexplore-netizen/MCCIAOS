@@ -4,8 +4,8 @@ Internal workspace for the MCCIA Applied AI Studio team: the work tracker,
 workshops and events, social content, outreach messages and shared resources.
 The team enters everything directly through the app.
 
-Originally built to the specs in `PRD.md`, `TRD.md`, `APP_FLOW.md`,
-`BACKEND_SCHEMA.md`, `UI_UX_BRIEF.md` and `IMPLEMENTATION_PLAN.md`. Those
+Originally built to the specs in `docs/PRD.md`, `docs/TRD.md`, `docs/APP_FLOW.md`,
+`docs/BACKEND_SCHEMA.md`, `docs/UI_UX_BRIEF.md` and `docs/IMPLEMENTATION_PLAN.md`. Those
 documents still describe the Dashboard, Companies, Consulting, App Development
 and Analytics modules, which have since been removed — see
 [Removed modules](#removed-modules).
