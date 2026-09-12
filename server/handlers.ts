@@ -213,7 +213,7 @@ export async function handleApi(req: ApiRequest): Promise<ApiResponse> {
     const info = describeStore();
     // Whether the export can run, without ever saying what the credentials are.
     // A host that has the database but not the Sheets variables looks perfectly
-    // healthy until 18:00, when the run fails somewhere nobody is watching.
+    // healthy until 17:00, when the run fails somewhere nobody is watching.
     // Names of missing variables only; never a value.
     let sheets: string;
     try {
@@ -945,7 +945,8 @@ async function handleWorkTracker(req: ApiRequest): Promise<ApiResponse> {
     }
 
     // ---- /api/export/daily -------------------------------------------------
-    // The 18:00 IST write to Google Sheets. Reachable two ways: a scheduler,
+    // The 17:00 IST write to Google Sheets, followed by the daily digest
+    // emails. Reachable two ways: a scheduler,
     // which presents CRON_SECRET, and a person pressing "Run now" in Settings,
     // who presents the admin passcode. Never open — it writes to a document
     // outside this app.

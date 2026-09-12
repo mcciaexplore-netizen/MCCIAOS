@@ -206,7 +206,7 @@ export const trackerApi = {
 
   /**
    * Writes today's work to the Google Sheet now, rather than waiting for the
-   * 18:00 run. `force` rewrites a day that has already been written, which is
+   * 17:00 run. `force` rewrites a day that has already been written, which is
    * what you want after correcting a task late in the day.
    */
   runDailyExport(force = false) {
@@ -217,6 +217,7 @@ export const trackerApi = {
       people: { name: string; tab: string; tasks: number; created: boolean; skipped?: string }[];
       log: { changes: number; skipped?: string };
       calling: { rows: number; skipped?: string };
+      emails: { sent: number; failed: number; skippedNoEmail: number; skipped?: string };
     }>(`/api/export/daily${force ? '?force=true' : ''}`, {
       method: 'POST',
       authorised: true,

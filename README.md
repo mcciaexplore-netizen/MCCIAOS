@@ -411,7 +411,7 @@ gitignored.
 
 ## Daily export to Google Sheets
 
-At 18:00 IST every day each person's work is appended to their own tab of the
+At 17:00 IST every day each person's work is appended to their own tab of the
 MCCIA OS Task sheet, creating the tab if it does not exist. Tabs are matched by
 name, case-insensitively and ignoring stray spaces, because a sheet maintained
 by hand will have "Aarushi " in it sooner or later and a second tab for the same
@@ -447,8 +447,8 @@ account:
    Without this every call returns 403, and the error says so by name.
 4. Put the four variables in the environment wherever the app runs.
 
-**The schedule.** `vercel.json` declares a cron at `30 12 * * *` — 12:30 UTC,
-which is 18:00 IST. Vercel Cron issues a **GET** carrying
+**The schedule.** `vercel.json` declares a cron at `30 11 * * *` — 11:30 UTC,
+which is 17:00 IST. Vercel Cron issues a **GET** carrying
 `Authorization: Bearer $CRON_SECRET`, so `CRON_SECRET` must be set in the Vercel
 project or the run is refused. A GET without that secret is answered 405, so the
 path cannot be fired by being linked to, prefetched or crawled.
@@ -465,6 +465,51 @@ scheduled path locally, call it the way Vercel does:
 curl -X GET http://localhost:5173/api/export/daily \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
+
+## Daily digest emails
+
+Right after the 17:00 sheet export, one of two emails goes out to each active
+person with an address on file — never both — built from the same data the
+export just gathered: no separate schedule, no second trip to the Sheets API.
+
+- **Everyone except admins** gets their own recap: the tasks currently on their
+  board, and whether today's data — a task update, their calling numbers — is
+  actually filled in. The point is the second half: three quiet days in the
+  sheet can mean nothing happened, or that nobody logged anything, and the
+  export alone cannot tell those apart. A person seeing "not filled in today"
+  in their own inbox can.
+- **Every `role = ADMIN` user** gets a different email instead — never the
+  personal recap — covering the whole team: for each person, today's
+  consultations (title, time, allocated/completed), today's calling figures,
+  and their current task list. One team-wide picture, not an aggregate count.
+
+Emails go out once per IST day no matter how many times the export runs that
+day — a forced rerun or a doubled cron fires the sheet writes again but never
+re-sends the mail (`db/digest.sql`, `digest_log`).
+
+**Setup.** Two environment variables, using a Gmail account with 2-Step
+Verification turned on:
+
+| Variable | Where it comes from |
+| --- | --- |
+| `MAIL_USER` | the sending address, e.g. `mcciaexplore@gmail.com` |
+| `MAIL_APP_PASSWORD` | a 16-character App Password for that account |
+| `MAIL_FROM_NAME` | optional; the "From" display name (default `MCCIA OS`) |
+
+1. On the sending Google account: **Google Account → Security → 2-Step
+   Verification** → turn it on if it isn't already.
+2. Same page → **App passwords** → create one (any name) → copy the
+   16-character password. The account's own login password will not
+   authenticate over SMTP once 2-Step Verification is on.
+3. Put `MAIL_USER` and `MAIL_APP_PASSWORD` in the environment wherever the app
+   runs, then `npm run mail:check` to confirm Gmail accepts them before relying
+   on the 17:00 run.
+4. Give each person an email in **Settings → Team** — a digest cannot reach
+   someone with no address on file; they are silently skipped and counted in
+   the export's result panel.
+
+Leaving both variables unset runs the app exactly as before: no digest is
+sent, and the sheet export is unaffected.
 
 
 ## Settings and admin access

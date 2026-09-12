@@ -22,7 +22,7 @@ create table if not exists org_settings (
   logo_data_uri        text        not null default '',
   brand_colour         text        not null default '#0B1F3A',
   at_risk_days         integer     not null default 3,
-  daily_export_time    text        not null default '18:00',
+  daily_export_time    text        not null default '17:00',
   daily_export_enabled boolean     not null default true,
   notify_on_overdue    boolean     not null default false,
   notify_on_approval   boolean     not null default false,
@@ -40,6 +40,10 @@ create table if not exists org_settings (
 );
 
 insert into org_settings (id) values (true) on conflict (id) do nothing;
+
+-- The export moved from 18:00 to 17:00. Only flips a row still sitting on the
+-- old default — a value someone already changed on purpose is left alone.
+update org_settings set daily_export_time = '17:00' where daily_export_time = '18:00';
 
 do $$
 declare n int;

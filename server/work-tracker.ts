@@ -75,10 +75,12 @@ const LATE_DATE = `t.deadline_date`;
  * 17:00 IST — the point in the day after which unfinished work has missed
  * another day.
  *
- * Chosen to sit an hour ahead of the 18:00 export, so the number a person sees
- * in the tracker is already settled by the time the same number is written to
- * their sheet. A cut-off at midnight would have let the export record a count
- * that changed minutes later.
+ * This lands at the same instant as the 17:00 export (moved up from 18:00),
+ * a deliberate choice: the hour of buffer that used to sit between them was
+ * dropped rather than shifting this cut-off earlier too. A task can in theory
+ * flip to late within the same second the export reads it — accepted, rather
+ * than moving "late" any earlier in the day. A cut-off at midnight would have
+ * let the export record a count that changed minutes later.
  */
 const CUTOFF = `time '17:00'`;
 

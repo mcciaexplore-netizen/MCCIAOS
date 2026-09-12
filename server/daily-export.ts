@@ -1,5 +1,6 @@
 /**
- * The 18:00 IST export: everybody's work, written to their own tab.
+ * The 17:00 IST export: everybody's work, written to their own tab, then the
+ * daily digest emails (see ./digest.ts) sent from that same data.
  *
  * One tab per person, matched by name against the tabs already in the sheet and
  * created if absent. Each run appends a dated block, so the tab becomes a
@@ -9,12 +10,16 @@
  * their tab is read; if today is already there, they are skipped. A cron that
  * fires twice, or somebody pressing "Run now" after the scheduled run, must not
  * double the record. Pass `force` to write anyway, which is what you want after
- * correcting a task late in the day.
+ * correcting a task late in the day. The digest emails follow their own,
+ * separate once-a-day guard (db/digest.sql) rather than reusing this one:
+ * `force` is for re-writing a corrected sheet row, not for re-mailing the team.
  */
 import { listChangesThrough, listTasks, listUsers } from './work-tracker.js';
 import { listCallingStatus } from './calling-status.js';
+import { listConsultations } from './consultations.js';
 import { LOG_HEADER, LOG_ID_COLUMN, LOG_TAB, LOG_TIME_COLUMN, logRow } from './change-log.js';
 import { openSheet, sheetsConfig, SheetsError } from './google-sheets.js';
+import { sendDailyDigests, type DigestOutcome } from './digest.js';
 import { istDate } from '../src/lib/ist.js';
 import type { Task } from '../src/types/index.js';
 
@@ -173,6 +178,7 @@ export interface ExportOutcome {
   skipped: number;
   log: { changes: number; skipped?: string };
   calling: { rows: number; skipped?: string };
+  emails: DigestOutcome;
 }
 
 export async function runDailyExport(
@@ -198,10 +204,16 @@ export async function runDailyExport(
     skipped: 0,
     log: { changes: 0 },
     calling: { rows: 0 },
+    emails: { sent: 0, failed: 0, skippedNoEmail: 0 },
   };
+
+  // Kept alongside the sheet writes below, for the digest: a quiet person is
+  // still owed an email saying so, even though their tab is left untouched.
+  const tasksByUser = new Map<string, Task[]>();
 
   for (const person of people) {
     const tasks = await listTasks({ user: person.id, tab: 'all' });
+    tasksByUser.set(person.id, tasks);
 
     // Somebody with nothing on is not written at all. A tab full of empty dated
     // rows is worse than a tab that simply has no entry for a quiet day.
@@ -246,6 +258,22 @@ export async function runDailyExport(
   // recorded rather than losing the whole run to the log.
   outcome.calling = await writeCallingStatus(sheet, day);
   outcome.log = await writeChangeLog(sheet, day);
+
+  // Three more Postgres reads, not Sheets calls — cheap, and the digest needs
+  // exactly-today's activity, where the Change Log tab reads through today.
+  const [changesToday, callingToday, consultationsToday] = await Promise.all([
+    listChangesThrough(day).then((changes) => changes.filter((c) => c.day === day)),
+    listCallingStatus(null, day),
+    listConsultations().then((rows) => rows.filter((c) => c.heldOn === day)),
+  ]);
+  outcome.emails = await sendDailyDigests({
+    day,
+    people,
+    tasksByUser,
+    changesToday,
+    callingToday,
+    consultationsToday,
+  });
 
   return outcome;
 }

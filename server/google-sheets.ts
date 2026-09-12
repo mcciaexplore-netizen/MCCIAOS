@@ -63,7 +63,7 @@ export function sheetsConfig(): SheetsConfig | null {
   // The key is copied out of a JSON file, where it is a quoted string. Paste it
   // into a dashboard field that does not want quotes and the quotes come along,
   // and every later check still passes: the value contains BEGIN PRIVATE KEY,
-  // so it looks configured, and only the signature fails — at 18:00, in a log
+  // so it looks configured, and only the signature fails — at 17:00, in a log
   // nobody reads. Strip them rather than let that be somebody's evening.
   let key = rawKey!;
   if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {

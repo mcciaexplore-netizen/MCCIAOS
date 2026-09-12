@@ -9,13 +9,15 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "logo": "node scripts/set-logo.mjs",
-    "sheets:check": "node scripts/check-sheets.mjs"
+    "sheets:check": "node scripts/check-sheets.mjs",
+    "mail:check": "node scripts/check-mail.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
     "@neondatabase/serverless": "^1.1.0",
     "@tanstack/react-query": "^5.51.0",
     "lucide-react": "^0.408.0",
+    "nodemailer": "^10.0.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.52.0",

@@ -100,7 +100,7 @@ export const DEFAULT_ORG_SETTINGS: OrgSettings = {
   logoDataUri: '',
   brandColour: '#0B1F3A',
   atRiskDays: 3,
-  dailyExportTime: '18:00',
+  dailyExportTime: '17:00',
   dailyExportEnabled: true,
   notifyOnOverdue: false,
   notifyOnApproval: false,

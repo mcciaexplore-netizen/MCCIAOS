@@ -892,8 +892,12 @@ function WorkTrackerAdmin() {
               Every edit is recorded the moment it happens, whether or not the sheet
               is reachable. Pressing Sync writes what is outstanding: each
               person&rsquo;s work to their own tab, and every old&rarr;new change to
-              the shared Change Log. It also runs on its own at 18:00 IST. Syncing
-              twice never duplicates a row.
+              the shared Change Log. It also runs on its own at 17:00 IST. Syncing
+              twice never duplicates a row. Right after, one email goes to each
+              person with an address on file: members get their own tasks and
+              whether today&rsquo;s data is filled in; admins get a team roundup
+              instead &mdash; everyone&rsquo;s consultations, tasks and calling for the
+              day &mdash; once per day, even if Sync is pressed again.
             </p>
           </div>
           <Button
@@ -922,6 +926,11 @@ function WorkTrackerAdmin() {
               {exportResult.log.skipped && ` (${exportResult.log.skipped})`}
               {`; ${exportResult.calling.rows} calling row${exportResult.calling.rows === 1 ? '' : 's'}`}
               {exportResult.calling.skipped && ` (${exportResult.calling.skipped})`}
+              {`; ${exportResult.emails.sent} digest email${exportResult.emails.sent === 1 ? '' : 's'} sent`}
+              {exportResult.emails.failed > 0 && `, ${exportResult.emails.failed} failed`}
+              {exportResult.emails.skippedNoEmail > 0 &&
+                `, ${exportResult.emails.skippedNoEmail} skipped (no email on file)`}
+              {exportResult.emails.skipped && ` (${exportResult.emails.skipped})`}
             </p>
             <ul className="mt-1 space-y-0.5 text-slate-500 dark:text-slate-400">
               {exportResult.people.map((p) => (
