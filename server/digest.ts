@@ -1,6 +1,8 @@
 /**
  * The daily digest: one email per member about their own day, and one
- * different email per admin about everybody's day.
+ * different email per admin — a roundup of the members' day, not the admin's
+ * own (admins don't get a personal recap, and don't appear as a row in the
+ * roundup either).
  *
  * Runs right after the 17:00 sheet export, from the same data that export just
  * gathered — no second trip to the Sheets API, only the Postgres reads the
@@ -294,16 +296,15 @@ export async function sendDailyDigests(params: {
   const adminRows: AdminRow[] = [];
 
   for (const person of params.people) {
+    // Admins don't do calling/consultation work the same way the team does,
+    // and don't get a personal recap — they get the roundup below instead,
+    // built from everyone else's day, not their own.
+    if (person.role === 'ADMIN') continue;
+
     const tasks = params.tasksByUser.get(person.id) ?? [];
     const calling = calledByUser.get(person.id) ?? null;
     const consultations = consultationsByUser.get(person.id) ?? [];
-
-    // Admins appear in the roundup rather than getting a personal recap —
-    // one audience, one email, never both.
-    if (person.role === 'ADMIN') {
-      adminRows.push({ name: person.name, colour: person.colour, tasks, consultations, calling });
-      continue;
-    }
+    adminRows.push({ name: person.name, colour: person.colour, tasks, consultations, calling });
 
     if (!person.email) {
       outcome.skippedNoEmail++;
